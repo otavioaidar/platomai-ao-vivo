@@ -3,7 +3,7 @@
 Notícias rápidas do mercado para o Brasil. O sistema vigia fontes oficiais, escreve a manchete em português (modelo fixo para números oficiais, IA para textos), publica no site em tempo real e envia às redes.
 
 ```
-fontes oficiais ──► monitor (consulta a cada 2–120 s) ──► redator ──► checagem ──► site ao vivo (SSE)
+fontes oficiais ──► monitor (consulta de 2 s a 10 min) ─► redator ──► checagem ──► site ao vivo (SSE)
  BCB, Copom, IBGE,       mais rápido perto das              │             │           ├─► Telegram
  SIDRA, Fed, BCE         divulgações da agenda              │             │           ├─► Bluesky
                                                             │             │           └─► RSS próprio
@@ -51,7 +51,7 @@ Horários de Brasília. As janelas rápidas ficam perto de quando a fonte costum
 | Fed: política monetária e discursos | RSS oficial + texto da página | 20 s / 60 s |
 | BCE: comunicados, discursos, entrevistas | RSS oficial + texto da página | 30 s |
 
-`POLL_SCALE` multiplica todos os intervalos, inclusive os das janelas, nunca abaixo de 1 s.
+`POLL_SCALE` multiplica os intervalos das fontes, inclusive os das janelas, nunca abaixo de 1 s (a agenda do IBGE não muda).
 
 ## Como a IA escreve
 
@@ -59,7 +59,7 @@ Horários de Brasília. As janelas rápidas ficam perto de quando a fonte costum
 - **Textos** (Copom, notas, Fed, BCE, releases) são lidos pelo Claude, que decide se vira manchete, a urgência e escreve a manchete em português. O pedido usa saída estruturada (JSON validado), pensamento adaptativo, esforço configurável e fallback no servidor quando o modelo recusa.
 - **Checagem automática:** todo número da manchete precisa existir na fonte, com a mesma unidade, escala e sinal (aceita só conversões explícitas, como 25 pb = 0,25 p.p. e 3-3/4 = 3,75). Se falhar, ou se a manchete passar de 240 caracteres, ela vai para `revisar`: não aparece no site (a menos que `SHOW_REVIEW=1`) e não vai para as redes.
 - **Nada se perde:** cada item novo entra numa fila no banco antes de ser escrito. Se a IA falhar ou o servidor reiniciar, ele é tentado de novo (15 s, 30 s, 1 min… até 30 min de intervalo). Depois de 6 h sem sucesso, ou se a IA recusar o item, ele fica em `revisar` com o título original da fonte.
-- **Notícia velha não vira urgente:** item que chega com mais de 6 h (por exemplo, depois de o servidor ficar fora do ar) entra só como histórico no site, sem alerta e sem ir para as redes.
+- **Notícia velha não dispara alerta:** item que chega com mais de 6 h (por exemplo, depois de o servidor ficar fora do ar) entra no site como histórico, sem bipe nem notificação, e não vai para as redes.
 - **Linha editorial:** `editorial/linha-editorial.md` diz o que cobrir, o que destacar e o que ignorar. A IA lê esse arquivo em toda manchete e o servidor recarrega quando ele muda. É aqui que a gente direciona a cobertura. Os fatos sempre vêm da fonte.
 
 ## Endereços

@@ -163,9 +163,12 @@ export class Pipeline {
 
   /** Marks new items seen and queues the ones to write, in one transaction, so a crash between the two never loses an item. */
   private admit(src: Source, items: RawItem[], detectedAt: number): void {
+    // Oldest first; items with the same date keep the feed's order (newest first), so the newest ties end up last.
     const fresh = items
-      .filter((i) => !this.o.store.isSeen(rawKey(i)))
-      .sort((a, b) => a.publishedAt.localeCompare(b.publishedAt));
+      .map((item, i) => ({ item, i }))
+      .filter(({ item }) => !this.o.store.isSeen(rawKey(item)))
+      .sort((a, b) => a.item.publishedAt.localeCompare(b.item.publishedAt) || b.i - a.i)
+      .map(({ item }) => item);
     if (!fresh.length) return;
     const bootstrap = !this.o.store.hasSeenAny(src.id);
     let todo = fresh;
@@ -345,6 +348,9 @@ export class Pipeline {
       try {
         await this.runOnce(src);
         delay = nextDelayMs(src, new Date(this.now()));
+        // Wake up for a queued retry even when the source itself is polled rarely (e.g. Copom outside its window).
+        const retryAt = this.o.store.nextPendingAt(src.id);
+        if (retryAt !== null) delay = Math.min(delay, Math.max(1000, retryAt - this.now()));
       } catch (err) {
         // A broken run (e.g. the database is locked) must never take the whole process down.
         log.error(`ciclo de ${src.id} falhou`, err);

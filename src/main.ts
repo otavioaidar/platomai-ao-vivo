@@ -67,6 +67,12 @@ const stopAgenda = keepRefreshed(
   AGENDA_RETRY_MS,
 );
 
+// A port that cannot be opened is fatal: exit so Docker or systemd restart the process instead of idling without a site.
+server.on("error", (err) => {
+  log.error("o servidor não abriu a porta", err);
+  process.exit(1);
+});
+
 server.listen(config.port, config.host, () => {
   log.info(`PlatomAI Ao Vivo em http://localhost:${config.port}`, {
     ia: writer.enabled ? `${writer.model} (esforço ${config.ai.effort})` : "desligada (rascunhos)",
@@ -92,8 +98,14 @@ async function shutdown() {
   store.close();
   process.exit(0);
 }
-// Last resort: a stray error is logged instead of taking the site down; each loop and request has its own handler.
-process.on("uncaughtException", (err) => log.error("erro não tratado", err));
-process.on("unhandledRejection", (err) => log.error("promessa rejeitada sem tratamento", err));
+// Last resort (each loop and request has its own handler): log with the stack and exit. Node's state is not safe to
+// resume after this; Docker or systemd restart the process and the pending queue picks the work up again.
+function fatal(what: string, err: unknown): never {
+  log.error(what, err);
+  console.error(err instanceof Error ? err.stack : err);
+  process.exit(1);
+}
+process.on("uncaughtException", (err) => fatal("erro não tratado", err));
+process.on("unhandledRejection", (err) => fatal("promessa rejeitada sem tratamento", err));
 process.on("SIGINT", () => void shutdown());
 process.on("SIGTERM", () => void shutdown());

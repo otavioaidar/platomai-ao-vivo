@@ -18,7 +18,7 @@ Ser, para o mercado brasileiro, o que FinancialJuice e investingLive são lá fo
 
 | Quando | Entrega |
 |---|---|
-| **Semana 1 (feito)** | MVP rodando: BCB, Copom, IBGE (releases, SIDRA, agenda), Focus, Fed, BCE → IA → site ao vivo → Telegram/Bluesky (em simulação até ter as credenciais). 29 testes passando. |
+| **Semana 1 (feito)** | MVP rodando: BCB, Copom, IBGE (releases, SIDRA, agenda), Focus, Fed, BCE → IA → site ao vivo → Telegram/Bluesky (em simulação até ter as credenciais). Revisão independente em 3 rodadas, 184 testes passando. |
 | Semana 2 | No ar: servidor, domínio, HTTPS. Chave da API do Claude, canal no Telegram, conta no Bluesky. Uma semana de manchetes reais para calibrar a linha editorial. Página de revisão para o Otávio. |
 | Semanas 3–4 | Mais fontes: Tesouro (leilões, resultado primário), BCB SGS (IBC-Br, fluxo cambial), dados dos EUA (CPI, payroll), agenda do Copom e do Fed. Conta no X. |
 | Mês 2 | Beta aberto. App instalável (PWA) com notificação. Medição de velocidade contra os sites de fora. Áudio (squawk em voz sintética) como teste. |

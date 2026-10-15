@@ -269,7 +269,8 @@ function normalizeHeadline(raw) {
     tag: str(raw.tag).trim() || str(raw.sourceName).trim() || 'Fonte',
     sourceName: str(raw.sourceName).trim(),
     region: str(raw.region),
-    urgency: raw.urgency === 'urgente' || raw.urgency === 'alta' ? raw.urgency : 'normal',
+    // A headline waiting for review (shown only with SHOW_REVIEW=1) never carries urgency: no flag, beep, notification or "Urgentes".
+    urgency: raw.status !== 'revisar' && (raw.urgency === 'urgente' || raw.urgency === 'alta') ? raw.urgency : 'normal',
     headline,
     // AI-off drafts of English sources carry the original title ("[EN] ...").
     lang: raw.lang === 'en' || (raw.method === 'rascunho' && headline.startsWith('[EN] ')) ? 'en' : null,
@@ -628,7 +629,7 @@ function resetUnread() {
 
 /** A genuinely new headline arrived (live, or recovered after an outage). */
 function onArrival(item, { replay = false } = {}) {
-  if (item.backfill) return;
+  if (item.backfill || item.status === 'revisar') return;
   fresh.add(item.id);
   if (replay && Date.now() - item.ts > REPLAY_ALERT_WINDOW) return;
   if (!passesFilter(item)) return; // alerts follow the chosen filter (the search does not count)

@@ -481,3 +481,23 @@ test("an English title kept as a review copy is marked lang=en for the page", as
   assert.equal(h.lang, "en");
   hub.close();
 });
+
+test("on first contact, items with the same date keep the feed's order, so the newest are the ones shown", async () => {
+  const sameDay = new Date(Date.now() - 30 * MIN).toISOString();
+  const feed = ["d", "c", "b", "a"].map((id) => ({ ...item(id, `Item ${id}`), publishedAt: sameDay })); // newest first, like a feed
+  const { p, src, hub } = setup([feed]);
+  const out = await p.runOnce(src);
+  assert.deepEqual(out.map((h) => h.headline).sort(), ["Item c", "Item d"]);
+  hub.close();
+});
+
+test("the store tells the loop when the next queued retry is due", async () => {
+  const { p, src, store, writer, clock, hub } = setup([[item("0", "Antigo", 60)], [item("0", "Antigo", 60), item("1", "Nota nova", 0)]]);
+  await p.runOnce(src);
+  assert.equal(store.nextPendingAt("fake"), null);
+  writer.failures = 1;
+  await p.runOnce(src);
+  const at = store.nextPendingAt("fake");
+  assert.ok(at !== null && at > clock.t && at <= clock.t + 16_000, "first retry about 15 s later");
+  hub.close();
+});

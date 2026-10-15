@@ -3,8 +3,8 @@
 import { parseNumber } from "../text.ts";
 
 type Lang = "pt" | "en";
-/** pct: "%", "por cento", "percent"; pp: percentage points; bp: basis points; null: no unit written. */
-type Unit = "pct" | "pp" | "bp" | null;
+/** pct: "%", "por cento", "percent"; pp: percentage points; bp: basis points; pts: a bare "ponto(s)"/"point(s)"; null: no unit written. */
+type Unit = "pct" | "pp" | "bp" | "pts" | null;
 /** num: a real figure; frac: a fraction, which counts only with a unit; date: part of a date or time; word: a spelled-out count or ordinal. */
 type Kind = "num" | "frac" | "date" | "word";
 
@@ -31,22 +31,14 @@ const word = (body: string, flags = "giu") => new RegExp(`(?<![${L}\\d])(?:${bod
 
 const BP: [RegExp, Exclude<Unit, null>] = [/^[\s-]*(?:pb|bps?|pontos?[\s-]+(?:base|básicos?)|basis[\s-]+points?)(?![\p{L}])/iu, "bp"];
 const PCT: [RegExp, Exclude<Unit, null>] = [/^\s*(?:%|por\s+cento(?![\p{L}])|percent(?![\p{L}])|per\s+cent(?![\p{L}]))/iu, "pct"];
+const PP: [RegExp, Exclude<Unit, null>] = [/^[\s-]*(?:p\.\s?p\.?|pp(?![\p{L}])|(?:de[\s-]+)?pontos?[\s-]+percentua(?:l|is)|percentage[\s-]+points?)/iu, "pp"];
 /**
- * Units by role. In the headline, a bare "ponto" is the house style for p.p. ("em 0,5 ponto", "1/4 de ponto").
- * In the source it must say percentual/percentage: "3 pontos de atenção" or "a 10-point plan" are not rates.
+ * A bare "ponto(s)"/"point(s)" is its own unit. In a headline it is the house style for a rate move ("em 0,5 ponto",
+ * "1/4 de ponto") and is backed by p.p., pb or the same bare points in the source. An explicit p.p. in the headline
+ * needs an explicit rate in the source: "3 pontos de atenção" or "a 10-point plan" never back "3 p.p." or "10 p.p.".
  */
-const UNITS: Record<"source" | "text", [RegExp, Exclude<Unit, null>][]> = {
-  source: [
-    BP,
-    [/^[\s-]*(?:p\.\s?p\.?|pp(?![\p{L}])|(?:de[\s-]+)?pontos?[\s-]+percentua(?:l|is)|percentage[\s-]+points?)/iu, "pp"],
-    PCT,
-  ],
-  text: [
-    BP,
-    [/^[\s-]*(?:p\.\s?p\.?|pp(?![\p{L}])|(?:de[\s-]+)?pontos?[\s-]+percentua(?:l|is)|percentage[\s-]+points?|(?:de[\s-]+)?pontos?(?![\p{L}])|points?(?![\p{L}]))/iu, "pp"],
-    PCT,
-  ],
-};
+const PTS: [RegExp, Exclude<Unit, null>] = [/^[\s-]*(?:de[\s-]+)?(?:pontos?|points?)(?![\p{L}])/iu, "pts"];
+const UNITS: Record<"source" | "text", [RegExp, Exclude<Unit, null>][]> = { source: [BP, PP, PTS, PCT], text: [BP, PP, PTS, PCT] };
 
 const SCALES: [RegExp, number][] = [
   [/^\s*(?:mil|thousand)(?![\p{L}])/iu, 1e3],
@@ -74,10 +66,10 @@ const PHRASES: Record<Lang, [string, number][]> = {
     [String.raw`meio[\s-]+ponto(?:[\s-]+percentual)?`, 0.5],
   ],
   en: [
-    [String.raw`three[\s-]+quarters?(?:[\s-]+of[\s-]+a)?[\s-]+(?:percentage[\s-]+)?points?`, 0.75],
+    [String.raw`(?:(?:a|one)[\s-]+three[\s-]+quarters?(?:[\s-]+of[\s-]+a)?[\s-]+(?:percentage[\s-]+)?|three[\s-]+quarters?(?:[\s-]+of[\s-]+a)?[\s-]+percentage[\s-]+|three[\s-]+quarters?[\s-]+of[\s-]+a[\s-]+|three-quarter-)points?`, 0.75],
     // An article, "percentage" or the hyphenated compound is required: "third quarter point to weaker growth" is not a cut.
     [String.raw`(?:(?:a|one)[\s-]+quarter(?:[\s-]+of[\s-]+a)?[\s-]+(?:percentage[\s-]+)?|quarter(?:[\s-]+of[\s-]+a)?[\s-]+percentage[\s-]+|quarter-)points?`, 0.25],
-    [String.raw`(?:(?:a|one)[\s-]+half(?:[\s-]+of)?(?:[\s-]+a)?[\s-]+(?:percentage[\s-]+)?|half(?:[\s-]+of)?(?:[\s-]+a)?[\s-]+percentage[\s-]+|half-)points?`, 0.5],
+    [String.raw`(?:(?:a|one)[\s-]+half(?:[\s-]+of)?(?:[\s-]+a)?[\s-]+(?:percentage[\s-]+)?|half(?:[\s-]+of)?(?:[\s-]+a)?[\s-]+percentage[\s-]+|half[\s-]+a[\s-]+|half-)points?`, 0.5],
   ],
 };
 
@@ -245,6 +237,7 @@ function backs(s: Num, h: Num): boolean {
   if (h.unit === "pct") return (s.unit === "pct" || (s.unit === null && /[.,]/.test(s.raw))) && same(h.value);
   // The only conversion allowed: basis points <-> percentage points, when the source states one of them.
   if (h.unit === "pp") return (s.unit === "pp" && same(h.value)) || (s.unit === "bp" && same(h.value * 100));
+  if (h.unit === "pts") return ((s.unit === "pts" || s.unit === "pp") && same(h.value)) || (s.unit === "bp" && same(h.value * 100));
   return (s.unit === "bp" && same(h.value)) || (s.unit === "pp" && same(h.value / 100));
 }
 

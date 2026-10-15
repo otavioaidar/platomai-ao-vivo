@@ -63,6 +63,25 @@ export class Agenda {
   items: AgendaItem[] = [];
   lastOkAt: string | null = null;
   lastError: string | null = null;
+  private waiters: (() => void)[] = [];
+
+  /** Whether a refresh has finished at least once (successfully or not). */
+  attempted(): boolean {
+    return this.lastOkAt !== null || this.lastError !== null;
+  }
+
+  /** Resolves when the first refresh finishes, or after `timeoutMs`, whichever comes first. */
+  async whenAttempted(timeoutMs: number): Promise<void> {
+    if (this.attempted()) return;
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, timeoutMs);
+      timer.unref();
+      this.waiters.push(() => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+  }
 
   /** Short timeout: a slow calendar must not hold up startup. */
   async refresh(now = new Date(), timeoutMs = 5_000): Promise<void> {
@@ -84,6 +103,8 @@ export class Agenda {
     } catch (err) {
       this.lastError = errorText(err);
       log.warn("agenda IBGE falhou", err);
+    } finally {
+      for (const wake of this.waiters.splice(0)) wake();
     }
   }
 
@@ -294,6 +315,9 @@ export function releaseTime(agenda: Agenda, match: (title: string) => boolean, n
   return { publishedAt: new Date(t).toISOString(), stale: now.getTime() - t > STALE_MS };
 }
 
+/** How long the first SIDRA poll after a start waits for the calendar before judging whether a release is old. */
+const AGENDA_WAIT_MS = 6_000;
+
 /** On release day the Focus median is fetched ahead of time; it is refreshed at most this often. */
 const FOCUS_TTL_MS = 3600 * S;
 /** At release time a missing median gets only this long; the squawk goes out without it otherwise. */
@@ -303,6 +327,7 @@ export function sidraSource(spec: SidraSpec, agenda: Agenda, scale: number): Sou
   const id = `sidra-${spec.id}`;
   let lastPeriod: string | null = null;
   let newPeriodAt: number | null = null; // when a period newer than the last one appeared
+  let watchedPeriod: string | null = null; // the period this process saw replace the previous one
   const focus = new Map<string, { median: number; at: number }>(); // by reference month
   const loading = new Set<string>();
 
@@ -340,16 +365,21 @@ export function sidraSource(spec: SidraSpec, agenda: Agenda, scale: number): Sou
       const rows = await fetchJson<SidraRow[]>(`https://apisidra.ibge.gov.br/values${spec.path}`);
       const rel = parseSidra(spec, rows);
       if (!rel) return [];
-      // A period change this process watched happen is news whatever the agenda says (tables can update early).
-      // On the first poll after a start nothing was watched: that is when an old release could look new, so
-      // without an agenda to date it, it is history.
-      const watched = lastPeriod !== null && rel.period > lastPeriod;
-      if (watched) newPeriodAt = now.getTime();
+      // A period change this process watched happen is news whatever the agenda says (tables can update early),
+      // and stays news on later polls of that period (e.g. if the pipeline failed to record it the first time).
+      // On the first poll after a start nothing was watched: that is when an old release could look new, so it
+      // waits briefly for the calendar and, without one to date the release, treats it as history.
+      if (lastPeriod !== null && rel.period > lastPeriod) {
+        watchedPeriod = rel.period;
+        newPeriodAt = now.getTime();
+      }
+      if (lastPeriod === null) await agenda.whenAttempted(AGENDA_WAIT_MS);
       lastPeriod = rel.period;
       prefetchFocus(nextMonth(rel.period), now);
+      const watched = rel.period === watchedPeriod;
       const r = releaseTime(agenda, spec.calendarTitle, now);
       const stale = watched ? false : agenda.lastOkAt === null || r.stale;
-      const publishedAt = watched && r.stale ? now.toISOString() : r.publishedAt;
+      const publishedAt = watched && r.stale && newPeriodAt !== null ? new Date(newPeriodAt).toISOString() : r.publishedAt;
       return [
         {
           sourceId: id,

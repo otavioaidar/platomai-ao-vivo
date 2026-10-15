@@ -120,6 +120,12 @@ export class Store {
   }
 
   /** Queued items of a source whose next attempt is due, oldest first. */
+  /** When the earliest queued item of a source is due again (epoch ms), or null when its queue is empty. */
+  nextPendingAt(sourceId: string): number | null {
+    const row = this.stmt("SELECT MIN(next_attempt_at) AS t FROM pending WHERE source_id = ?").get(sourceId) as { t: number | null } | undefined;
+    return row?.t ?? null;
+  }
+
   duePending(sourceId: string, now: number): PendingJob[] {
     const rows = this.stmt(
       `SELECT raw_key, source_id, item_json, backfill, attempts, first_detected_at FROM pending

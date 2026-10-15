@@ -172,6 +172,7 @@ function agendaWith(items: [string, string][], loaded = true): Agenda {
     .map(([when, product]): AgendaItem => ({ when, title: product, product, source: "IBGE", done: false }))
     .sort((x, y) => x.when.localeCompare(y.when));
   a.lastOkAt = loaded ? new Date().toISOString() : null;
+  a.lastError = loaded ? null : "agenda indisponível"; // a finished, failed refresh: polls do not wait for it
   return a;
 }
 
@@ -373,4 +374,37 @@ test("SIDRA: without an agenda, the first poll after a start is history", async 
   const spec = SIDRA_SPECS.find((s) => s.id === "ipca")!;
   const [first] = await sidraSource(spec, agendaWith([], false), 1).poll();
   assert.equal(first.stale, true);
+});
+
+test("SIDRA: a watched period change stays news on later polls (e.g. after a failed record)", async (t) => {
+  let last = "202608";
+  stubFetch(t, () => json(ipcaRows(last)));
+  const spec = SIDRA_SPECS.find((s) => s.id === "ipca")!;
+  const src = sidraSource(spec, agendaWith([], false), 1); // calendar down
+  await src.poll();
+  last = "202609";
+  const [first] = await src.poll();
+  const [again] = await src.poll();
+  assert.equal(first.stale, undefined);
+  assert.equal(again.stale, undefined);
+  assert.equal(again.publishedAt, first.publishedAt);
+});
+
+test("agenda: the first SIDRA poll waits for the calendar's first answer", async () => {
+  const a = new Agenda();
+  let done = false;
+  const wait = a.whenAttempted(5_000).then(() => (done = true));
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(done, false);
+  // refresh() wakes the waiters in its finally block, here after a failed request.
+  const real = globalThis.fetch;
+  globalThis.fetch = (async () => new Response("erro", { status: 500 })) as typeof fetch;
+  try {
+    await a.refresh();
+  } finally {
+    globalThis.fetch = real;
+  }
+  await wait;
+  assert.equal(done, true);
+  assert.equal(a.attempted(), true);
 });
