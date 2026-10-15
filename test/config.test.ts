@@ -106,3 +106,18 @@ test("SSE caps have defaults and accept 0 to turn the per-IP cap off", () => {
   assert.equal(loadConfig({ SSE_MAX_CLIENTS: "0" }, (m) => warnings.push(m)).sse.maxClients, 2000);
   assert.equal(warnings.length, 1);
 });
+
+test("Alpha Vantage stays internal unless told otherwise, and bad queries are dropped with a warning", () => {
+  const def = loadConfig({}, () => {}).alphaVantage;
+  assert.equal(def.apiKey, "");
+  assert.equal(def.use, "interno");
+  assert.ok(def.queries.includes("topics:economy_monetary") && def.queries.includes("tickers:PBR"));
+  assert.equal(def.intervalMs, 120_000);
+  const warnings: string[] = [];
+  const cfg = loadConfig({ ALPHAVANTAGE_USO: "Publico", ALPHAVANTAGE_CONSULTAS: "tickers:VALE, keywords:selic ,topics:economy_macro", ALPHAVANTAGE_INTERVALO_S: "10" }, (m) => warnings.push(m)).alphaVantage;
+  assert.equal(cfg.use, "publico");
+  assert.deepEqual(cfg.queries, ["tickers:VALE", "topics:economy_macro"]);
+  assert.equal(cfg.intervalMs, 120_000, "below 30 s falls back to the default");
+  assert.equal(warnings.length, 2);
+  assert.equal(loadConfig({ ALPHAVANTAGE_USO: "sim" }, () => {}).alphaVantage.use, "interno");
+});

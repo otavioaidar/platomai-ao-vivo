@@ -1,3 +1,4 @@
+import { createHash, timingSafeEqual } from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
@@ -17,6 +18,15 @@ export interface ServerDeps {
   showReview: boolean;
   ai: { enabled: boolean; model: string };
   statuses: () => SourceStatus[];
+  /** Bearer token for the private review queue (/api/revisao). Empty: the queue is not served at all. */
+  reviewToken?: string;
+}
+
+/** Constant-time check of "Authorization: Bearer <token>" (both sides hashed, so lengths never leak). */
+export function bearerOk(header: string | undefined, token: string): boolean {
+  if (!token || !header?.startsWith("Bearer ")) return false;
+  const digest = (s: string) => createHash("sha256").update(s).digest();
+  return timingSafeEqual(digest(header.slice(7).trim()), digest(token));
 }
 
 const TYPES: Record<string, string> = {
@@ -144,6 +154,20 @@ function route(deps: ServerDeps, req: http.IncomingMessage, res: http.ServerResp
     }
     case "/healthz":
       return json(res, { ok: true });
+    case "/revisao":
+      return serveStatic(deps, "/revisao.html", res);
+    case "/api/revisao": {
+      if (!deps.reviewToken) {
+        res.writeHead(404, { "content-type": "text/plain; charset=utf-8" }).end("Não encontrado");
+        return;
+      }
+      if (!bearerOk(req.headers.authorization, deps.reviewToken)) {
+        res.writeHead(401, { "www-authenticate": "Bearer", "cache-control": "no-store" }).end();
+        return;
+      }
+      const limit = Math.min(500, Math.max(1, Number(url.searchParams.get("limit") ?? 200) || 200));
+      return json(res, { items: deps.store.reviewQueue(limit) });
+    }
     default:
       return serveStatic(deps, url.pathname, res);
   }

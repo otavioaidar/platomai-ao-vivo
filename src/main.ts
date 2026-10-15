@@ -7,6 +7,7 @@ import { Pipeline, keepRefreshed } from "./pipeline.ts";
 import { buildPublishers } from "./publishers/index.ts";
 import { createServer } from "./server.ts";
 import { officialFeeds } from "./sources/feeds.ts";
+import { alphaVantageSource, parseQuery } from "./sources/alphavantage.ts";
 import { Agenda, SIDRA_SPECS, ibgeReleases, sidraSource } from "./sources/ibge.ts";
 import { ClaudeWriter, DraftWriter } from "./writer/ai.ts";
 import type { Writer } from "./writer/ai.ts";
@@ -29,10 +30,15 @@ const writer: Writer = config.ai.enabled
   : new DraftWriter();
 const publishers = buildPublishers(config);
 
+const av = config.alphaVantage;
 const sources = [
   ...officialFeeds(config.pollScale),
   ibgeReleases(agenda, config.pollScale),
   ...SIDRA_SPECS.map((s) => sidraSource(s, agenda, config.pollScale)),
+  // Only with a key; "interno" (the default) keeps its items on the private review page.
+  ...(av.apiKey
+    ? [alphaVantageSource({ apiKey: av.apiKey, use: av.use, minRelevance: av.minRelevance, intervalMs: av.intervalMs, queries: av.queries.map(parseQuery).filter((q) => q !== null) })]
+    : []),
 ];
 
 const pipeline = new Pipeline({
@@ -55,6 +61,7 @@ const server = createServer({
   showReview: config.showReview,
   ai: { enabled: writer.enabled, model: writer.model },
   statuses: () => pipeline.statuses(),
+  reviewToken: config.reviewToken,
 });
 
 // The calendar loads in the background: a slow IBGE must not hold up the site or the other sources.
@@ -78,6 +85,8 @@ server.listen(config.port, config.host, () => {
     ia: writer.enabled ? `${writer.model} (esforço ${config.ai.effort})` : "desligada (rascunhos)",
     fontes: sources.length,
     redes: publishers.map((p) => `${p.name}:${p.live ? "ao vivo" : "simulação"}`),
+    alphaVantage: av.apiKey ? `${av.use} (${av.queries.length} consultas a cada ${av.intervalMs / 1000} s)` : "sem chave",
+    revisao: config.reviewToken ? "/revisao (com token)" : "desligada (defina REVIEW_TOKEN)",
   });
   pipeline.start(sources);
 });

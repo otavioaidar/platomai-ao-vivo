@@ -53,6 +53,19 @@ Horários de Brasília. As janelas rápidas ficam perto de quando a fonte costum
 
 `POLL_SCALE` multiplica os intervalos das fontes, inclusive os das janelas, nunca abaixo de 1 s (a agenda do IBGE não muda).
 
+## Alpha Vantage (já assinada pela PlatomAI)
+
+Com `ALPHAVANTAGE_API_KEY`, o sistema lê o NEWS_SENTIMENT a cada 2 min: notícias de política monetária, macro e fiscal, e de empresas brasileiras listadas nos EUA (PBR, VALE, ITUB, BBD, NU, XP, ERJ, SBS). As consultas vêm de `ALPHAVANTAGE_CONSULTAS`.
+
+- **Licença:** a licença padrão da Alpha Vantage é pessoal e não comercial. Uso por empresa, ou por quem é gestor de recursos, conta como comercial e pede acordo por escrito (premium@alphavantage.co).
+- **Modo `interno` (padrão):** as notícias vão só para a página privada de revisão. Não passam pela IA, não aparecem no site e não vão para as redes.
+- **Modo `publico`:** use só com o acordo comercial que cubra exibição pública, reescrita por IA e redes. Mesmo assim, o texto original é de terceiros (Reuters, Benzinga, CNBC…): a manchete reescreve o fato, cita o veículo e linka a matéria.
+- **Filtro de relevância:** as notas de relevância da Alpha Vantage são generosas, por isso o corte padrão é 0,8.
+
+## Página privada de revisão
+
+`/revisao` lista o que não foi para o site: manchetes que falharam na checagem, itens que a IA recusou e fontes de uso interno. Defina `REVIEW_TOKEN` e entre por `https://<site>/revisao#t=<token>`. A página não é indexada, e os dados só saem com o token (`Authorization: Bearer`).
+
 ## Como a IA escreve
 
 - **Números oficiais não passam pela IA.** IPCA, IPCA-15 e desemprego saem de um modelo fixo, direto dos dados do IBGE. O IPCA é comparado com a mediana do Focus; o desemprego, com o trimestre anterior sem sobreposição, como o IBGE faz. A IA só acrescenta depois o "PlatomAI explica".
@@ -72,6 +85,7 @@ Horários de Brasília. As janelas rápidas ficam perto de quando a fonte costum
 | `/api/agenda` | Agenda de divulgações |
 | `/api/status` | Saúde das fontes e da IA |
 | `/rss.xml` | RSS próprio |
+| `/revisao` | Fila de revisão privada (precisa de `REVIEW_TOKEN`) |
 | `/healthz` | Saúde do processo (usado pelo HEALTHCHECK do Docker) |
 
 ## Estrutura

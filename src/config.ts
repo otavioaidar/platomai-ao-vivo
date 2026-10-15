@@ -6,6 +6,12 @@ export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
 
 const EFFORTS: readonly Effort[] = ["low", "medium", "high", "xhigh", "max"];
 const URGENCIES: readonly Urgency[] = ["normal", "alta", "urgente"];
+const AV_USES = ["interno", "publico"] as const;
+/** Monetary, macro and fiscal news, plus US-listed Brazilian companies (ADRs and Nasdaq/NYSE listings). */
+const AV_DEFAULT_QUERIES = [
+  "topics:economy_monetary", "topics:economy_macro", "topics:economy_fiscal",
+  "tickers:PBR", "tickers:VALE", "tickers:ITUB", "tickers:BBD", "tickers:NU", "tickers:XP", "tickers:ERJ", "tickers:SBS",
+];
 const TRUE = ["1", "true", "sim", "yes", "on"];
 const FALSE = ["0", "false", "nao", "não", "no", "off"];
 
@@ -52,6 +58,18 @@ function reader(env: Env, warn: (msg: string) => void) {
       return def;
     },
 
+    /** Comma-separated values, trimmed; values that fail `valid` are dropped with a warning. */
+    list(name: string, def: readonly string[], valid: (v: string) => boolean, expected: string): string[] {
+      const v = raw(name);
+      if (v === undefined) return [...def];
+      const items = v.split(",").map((s) => s.trim()).filter(Boolean);
+      const good = items.filter(valid);
+      for (const b of items.filter((i) => !valid(i))) warn(`config: ${name} ignora "${b}" (${expected})`);
+      if (good.length) return good;
+      bad(name, v, expected, def.join(","));
+      return [...def];
+    },
+
     /** An http(s) address without the trailing slash. */
     url(name: string, def: string): string {
       const v = raw(name);
@@ -78,6 +96,20 @@ export function loadConfig(env: Env, warn: (msg: string) => void = (msg) => log.
     backfillPerSource: r.num("BACKFILL_PER_SOURCE", 3, 0, 50, true),
     /** Show headlines that failed the automatic check (status "revisar") on the public site. */
     showReview: r.bool("SHOW_REVIEW", false),
+    /** Token for the private review page (/revisao). Empty: the page's data API is off. */
+    reviewToken: r.str("REVIEW_TOKEN", ""),
+    alphaVantage: {
+      apiKey: r.str("ALPHAVANTAGE_API_KEY", ""),
+      /**
+       * interno: a private radar (review page only). publico: items become headlines, which requires Alpha Vantage's
+       * written commercial agreement: its standard licence is personal and non-commercial.
+       */
+      use: r.oneOf("ALPHAVANTAGE_USO", AV_USES, "interno"),
+      queries: r.list("ALPHAVANTAGE_CONSULTAS", AV_DEFAULT_QUERIES, (q) => /^(topics|tickers):[A-Za-z0-9_.:-]+$/.test(q), "use topics:<tema> ou tickers:<código>"),
+      // Alpha Vantage scores are generous: on a live AAPL sample, 0.8 kept 20 of 20 Apple stories, 0.5 let in 29 unrelated ones.
+      minRelevance: r.num("ALPHAVANTAGE_RELEVANCIA_MIN", 0.8, 0, 1),
+      intervalMs: r.num("ALPHAVANTAGE_INTERVALO_S", 120, 30, 3600, true) * 1000,
+    },
     /** Live-stream (SSE) caps: total open streams and streams per viewer IP (0 turns the per-IP cap off). */
     sse: {
       maxClients: r.num("SSE_MAX_CLIENTS", 2000, 1, 100000, true),

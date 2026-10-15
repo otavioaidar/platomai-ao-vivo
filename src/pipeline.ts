@@ -217,6 +217,8 @@ export class Pipeline {
 
   private async process(src: Source, job: PendingJob): Promise<Headline | null> {
     const item = src.enrich ? await src.enrich(job.item) : job.item;
+    // Licensed for internal use only: keep it for the private review page, never public, and never sent to the AI.
+    if (item.reviewOnly) return this.commit(job, { ...this.review(src, item, job, item.reviewOnly), internalOnly: true });
     if (item.data) {
       const draft = renderIndicator(item.data);
       if (!draft) {
@@ -301,7 +303,7 @@ export class Pipeline {
   /** Saves the headline and clears its queue entry in one transaction, then sends it to the site and social networks. */
   private commit(job: PendingJob, h: Headline): Headline {
     this.o.store.finish(job.key, h);
-    if (h.status === "publicado" || this.o.showReview) this.o.hub.send("headline", h);
+    if (h.status === "publicado" || (this.o.showReview && !h.internalOnly)) this.o.hub.send("headline", h);
     log.info(`${h.status} [${h.tag}] ${h.headline}`, { ms: h.latencyMs, metodo: h.method, ...(h.reviewReason ? { reviewReason: h.reviewReason } : {}) });
 
     if (!h.backfill && h.status === "publicado" && h.method !== "rascunho" && meetsUrgency(h, this.o.minUrgency)) {

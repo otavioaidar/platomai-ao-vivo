@@ -501,3 +501,28 @@ test("the store tells the loop when the next queued retry is due", async () => {
   assert.ok(at !== null && at > clock.t && at <= clock.t + 16_000, "first retry about 15 s later");
   hub.close();
 });
+
+test("an item from an internal-use source goes only to the review queue: no AI, no site, no social, even with SHOW_REVIEW", async () => {
+  const store = new Store(":memory:");
+  const hub = new Hub(60_000);
+  const sent: string[] = [];
+  hub.send = (event) => void sent.push(event);
+  const writer = new FakeWriter();
+  const pub = new FakePublisher();
+  const p = new Pipeline({ store, writer, hub, publishers: [pub], minUrgency: "normal", backfillPerSource: 2, showReview: true, aiConcurrency: 1 });
+  const internal = { ...item("1", "Fed official says rates may stay high", 0), lang: "en" as const, reviewOnly: "uso interno (Alpha Vantage · Reuters): licença pendente" };
+  const src = fakeSource([[item("0", "Antigo", 60)], [item("0", "Antigo", 60), internal]]);
+  await p.runOnce(src);
+  sent.length = 0;
+  const [h] = await p.runOnce(src);
+  assert.equal(h.status, "revisar");
+  assert.equal(h.internalOnly, true);
+  assert.equal(h.reviewReason, "uso interno (Alpha Vantage · Reuters): licença pendente");
+  assert.equal(h.headline, "[EN] Fed official says rates may stay high");
+  assert.equal(writer.calls, 1, "only the backfilled item went to the writer");
+  assert.equal(pub.sent.length, 0);
+  assert.deepEqual(sent, [], "not broadcast to the public page");
+  assert.equal(store.latest(10, true).some((x) => x.id === h.id), false, "SHOW_REVIEW never exposes internal items");
+  assert.equal(store.reviewQueue(10)[0].id, h.id);
+  hub.close();
+});

@@ -303,3 +303,38 @@ test("per-IP cap keys IPv6 viewers by their /64 and reads IPv4-mapped addresses 
   assert.equal(ipKey("::ffff:203.0.113.9"), "203.0.113.9");
   assert.equal(ipKey("203.0.113.9"), "203.0.113.9");
 });
+
+test("the review queue needs the token, and is off without one", async () => {
+  const off = await extraServer({});
+  try {
+    assert.equal((await fetch(`${off.url}/api/revisao`)).status, 404);
+  } finally {
+    off.close();
+  }
+  store.save({ ...headline("rev1", "revisar"), reviewReason: "números sem respaldo na fonte: 13,50" });
+  store.save({ ...headline("int1", "revisar"), internalOnly: true, reviewReason: "uso interno (Alpha Vantage · Reuters)" });
+  const on = await extraServer({ reviewToken: "segredo-longo" });
+  try {
+    assert.equal((await fetch(`${on.url}/api/revisao`)).status, 401);
+    assert.equal((await fetch(`${on.url}/api/revisao`, { headers: { authorization: "Bearer errado" } })).status, 401);
+    const res = await fetch(`${on.url}/api/revisao`, { headers: { authorization: "Bearer segredo-longo" } });
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get("cache-control"), "no-store");
+    const ids = ((await res.json()) as { items: Headline[] }).items.map((h) => h.id);
+    assert.ok(ids.includes("rev1") && ids.includes("int1"));
+    assert.ok(!ids.includes("a"), "published headlines are not in the queue");
+  } finally {
+    on.close();
+  }
+  const pubs = ((await (await fetch(`${base}/api/headlines`)).json()) as { items: Headline[] }).items.map((h) => h.id);
+  assert.ok(!pubs.includes("int1") && !pubs.includes("rev1"));
+});
+
+test("bearerOk compares the whole token", async () => {
+  const { bearerOk } = await import("../src/server.ts");
+  assert.equal(bearerOk("Bearer abc", "abc"), true);
+  assert.equal(bearerOk("Bearer abcd", "abc"), false);
+  assert.equal(bearerOk("abc", "abc"), false);
+  assert.equal(bearerOk(undefined, "abc"), false);
+  assert.equal(bearerOk("Bearer ", ""), false);
+});

@@ -30,6 +30,11 @@ export interface RawItem {
   data?: IndicatorRelease;
   /** The source knows this item is old news (e.g. a release from before an outage): show it as history only. */
   stale?: boolean;
+  /**
+   * The source's licence covers internal use only (e.g. Alpha Vantage without a written commercial agreement):
+   * the item is kept for the private review page with this reason, never shown publicly, and never sent to the AI.
+   */
+  reviewOnly?: string;
 }
 
 export interface SourceStatus {
@@ -88,6 +93,8 @@ export interface Headline {
   reviewReason?: string;
   /** Set to "en" when the headline is the source's English title (AI off or review copy). */
   lang?: "pt" | "en";
+  /** From a source licensed for internal use only: shown on the private review page, never on the public site. */
+  internalOnly?: boolean;
 }
 
 export const TOPICS = [

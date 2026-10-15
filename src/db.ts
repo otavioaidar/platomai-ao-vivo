@@ -171,11 +171,18 @@ export class Store {
     return row ? (JSON.parse(row.json) as Headline) : null;
   }
 
+  /** Public headlines, newest first. `includeReview` adds the ones waiting for review, except internal-only items. */
   latest(limit: number, includeReview = false): Headline[] {
     const sql = includeReview
-      ? "SELECT json FROM headlines ORDER BY published_at DESC LIMIT ?"
+      ? "SELECT json FROM headlines WHERE coalesce(json_extract(json, '$.internalOnly'), 0) = 0 ORDER BY published_at DESC LIMIT ?"
       : "SELECT json FROM headlines WHERE status = 'publicado' ORDER BY published_at DESC LIMIT ?";
     const rows = this.stmt(sql).all(limit) as { json: string }[];
+    return rows.map((r) => JSON.parse(r.json) as Headline);
+  }
+
+  /** Everything waiting for a human (failed checks, refusals, internal-only sources), newest first. */
+  reviewQueue(limit: number): Headline[] {
+    const rows = this.stmt("SELECT json FROM headlines WHERE status = 'revisar' ORDER BY published_at DESC LIMIT ?").all(limit) as { json: string }[];
     return rows.map((r) => JSON.parse(r.json) as Headline);
   }
 

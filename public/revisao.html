@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Revisão · PlatomAI Ao Vivo</title>
+<meta name="theme-color" content="#0D0F1A">
+<meta name="color-scheme" content="dark">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%230D0F1A'/><path d='M23 50V14h12a11 11 0 0 1 0 22H23' fill='none' stroke='%238B5CF6' stroke-width='8' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,500..800&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="revisao.css">
+<script type="module" src="revisao.js"></script>
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="/">Platom<span class="ai">AI</span> Ao Vivo</a>
+  <span class="pill">Revisão interna</span>
+</header>
+
+<main class="wrap">
+  <h1>Fila de revisão</h1>
+  <p class="lead">O que não foi para o site: manchetes que falharam na checagem, itens que a IA recusou e fontes de uso interno (como a Alpha Vantage, até a licença comercial). Esta página não é indexada e só mostra dados com o token.</p>
+
+  <form id="login" class="login" hidden>
+    <label for="token">Token de acesso</label>
+    <div class="row">
+      <input id="token" type="password" autocomplete="current-password" required>
+      <button type="submit">Entrar</button>
+    </div>
+  </form>
+
+  <div id="bar" class="bar" hidden>
+    <label for="filter">Mostrar</label>
+    <select id="filter">
+      <option value="todos">Tudo</option>
+      <option value="interno">Só fontes de uso interno</option>
+      <option value="checagem">Só checagem e recusas</option>
+    </select>
+    <button id="refresh" type="button">Atualizar</button>
+    <button id="logout" type="button" class="ghost">Sair</button>
+    <span id="count" class="count" aria-live="polite"></span>
+  </div>
+
+  <p id="msg" class="msg" role="status"></p>
+  <ol id="list" class="list"></ol>
+</main>
+</body>
+</html>
