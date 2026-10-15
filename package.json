@@ -12,7 +12,8 @@
     "dev": "NODE_USE_ENV_PROXY=1 node --env-file-if-exists=.env --disable-warning=ExperimentalWarning --disable-warning=UNDICI-EHPA --watch src/main.ts",
     "test": "node --disable-warning=ExperimentalWarning --test test/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "probe": "node --disable-warning=ExperimentalWarning scripts/probe.ts"
+    "probe": "node --disable-warning=ExperimentalWarning scripts/probe.ts",
+    "amostra": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning scripts/amostra.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.134.0",

@@ -32,6 +32,7 @@ Outros comandos:
 | `npm test` | Testes automatizados (parsers com dados reais salvos, redator, checagem, servidor) |
 | `npm run typecheck` | Checagem de tipos |
 | `npm run probe` | Consulta cada fonte uma vez e mostra o que encontrou, sem publicar |
+| `npm run amostra` | Mostra como a IA escreveria as últimas notícias de cada fonte, sem publicar (salva em `data/`) |
 
 ## Fontes no ar
 
@@ -81,3 +82,15 @@ public/              site (HTML/CSS/JS, sem build)
 editorial/           linha editorial lida pela IA
 certs/               certificado intermediário que o servidor do IBGE não envia
 ```
+
+## Colocar no ar
+
+Numa VM com Docker:
+
+```bash
+docker build -t platomai-ao-vivo .
+docker run -d --name aovivo --restart unless-stopped -p 80:8080 \
+  --env-file .env -v aovivo-data:/data platomai-ao-vivo
+```
+
+Na frente, um proxy com HTTPS (Caddy ou Nginx). No Nginx, desligue o buffer em `/api/stream` (`proxy_buffering off;`) para o ao vivo não atrasar.
