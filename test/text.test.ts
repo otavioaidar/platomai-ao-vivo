@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { extractArticle, fmtPct, htmlToText, monthName, numbersIn, truncate } from "../src/text.ts";
-import { sourceNumbers, unsupportedNumbers } from "../src/writer/guard.ts";
+import { decodeEntities, extractArticle, fmtPct, htmlToText, monthName, numbersIn, parseNumber, truncate } from "../src/text.ts";
 
 test("formats Brazilian percentages", () => {
   assert.equal(fmtPct(0.82), "0,82%");
@@ -10,10 +9,23 @@ test("formats Brazilian percentages", () => {
   assert.equal(monthName("202609"), "setembro");
 });
 
-test("reads numbers in both pt-BR and en notation", () => {
-  assert.ok(numbersIn("Selic em 13,75% a.a.").includes(13.75));
-  assert.ok(numbersIn("rate of 4.25 percent").includes(4.25));
-  assert.ok(numbersIn("R$ 1.234,56").includes(1234.56));
+test("reads numbers only the way the text's language writes them", () => {
+  assert.deepEqual(numbersIn("Selic em 13,75% a.a."), [13.75]);
+  assert.deepEqual(numbersIn("rate of 4.25 percent", "en"), [4.25]);
+  assert.deepEqual(numbersIn("R$ 1.234,56"), [1234.56]);
+  assert.deepEqual(numbersIn("US$ 1,234.56", "en"), [1234.56]);
+  // No second reading: a pt "4,9" is never 49, an en "4.3" is never 43.
+  assert.equal(parseNumber("4,9", "pt"), 4.9);
+  assert.equal(parseNumber("4.3", "en"), 4.3);
+  assert.equal(parseNumber("12,400,000", "en"), 12_400_000);
+});
+
+test("decodes entities and never throws on an invalid code point", () => {
+  assert.equal(decodeEntities("Selic &amp; IPCA &#233; &#x00E9; &frac12; &minus;0,3"), "Selic & IPCA é é ½ −0,3");
+  assert.equal(decodeEntities("Taxa &#99999999; 13,75%"), "Taxa &#99999999; 13,75%");
+  assert.equal(decodeEntities("x &#x110000; y"), "x &#x110000; y");
+  assert.equal(decodeEntities("&#xFFFFFFFFFFFFFFFFFFFF;"), "&#xFFFFFFFFFFFFFFFFFFFF;");
+  assert.equal(htmlToText("<p>Taxa &#99999999; 13,75%</p>"), "Taxa &#99999999; 13,75%");
 });
 
 test("turns HTML into text, dropping scripts and comments", () => {
@@ -29,17 +41,4 @@ test("extracts the article body from a page", () => {
 test("truncates on a word boundary", () => {
   assert.equal(truncate("abc def ghi", 8), "abc def…");
   assert.equal(truncate("curto", 10), "curto");
-});
-
-test("guard accepts Fed fractions and basis-point conversions", () => {
-  const src = "The Committee decided to lower the target range for the federal funds rate by 1/4 percentage point to 3-3/4 to 4 percent.";
-  assert.ok(sourceNumbers(src).has(3.75));
-  assert.deepEqual(unsupportedNumbers("Fed corta juros em 0,25 p.p., para a faixa de 3,75% a 4,00%", src), []);
-  assert.deepEqual(unsupportedNumbers("Fed corta juros em 25 pb", src), []);
-});
-
-test("guard flags numbers the source does not contain", () => {
-  const src = "Copom reduz a taxa Selic para 13,75% a.a.";
-  assert.deepEqual(unsupportedNumbers("Copom reduz Selic para 13,75% ao ano", src), []);
-  assert.deepEqual(unsupportedNumbers("Copom reduz Selic para 13,50% ao ano", src), ["13,50"]);
 });

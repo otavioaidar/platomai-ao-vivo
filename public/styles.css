@@ -1,7 +1,7 @@
-/* PlatomAI Ao Vivo — estilos. Tema único escuro (paleta da marca). */
+/* PlatomAI Ao Vivo — styles. Single dark theme (brand palette). No green anywhere. */
 
 :root {
-  /* Superfícies */
+  /* Surfaces */
   --bg: #0D0F1A;
   --bg-glass: rgba(13, 15, 26, 0.94);
   --surface: #141728;
@@ -11,10 +11,11 @@
   --border: #272B42;
   --border-soft: #1F2338;
   --border-strong: #343954;
-  --border-hover: #4A4F72;
-  --chip-border: #2E3250;
+  /* Borders of inputs, chips and toggles: at least 3:1 against --surface and --bg. */
+  --control-border: #666B90;
+  --control-border-hover: #8C91B6;
 
-  /* Marca */
+  /* Brand */
   --purple: #8B5CF6;
   --purple-btn: #7C3AED;
   --purple-text: #B49CFB;
@@ -30,12 +31,12 @@
   --blue-wash: rgba(46, 117, 182, 0.18);
   --blue-border: #24476B;
 
-  /* Texto */
+  /* Text */
   --text: #ECEBF5;
   --text-2: #C9CADB;
   --muted: #A4A6BD;
 
-  /* Urgente / negativo */
+  /* Urgent / negative */
   --red: #F07A72;
   --red-border: #6B2E2A;
   --red-wash: rgba(240, 122, 114, 0.06);
@@ -54,7 +55,15 @@
 
 *, *::before, *::after { box-sizing: border-box; }
 
-html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+/* Author rules like .toggle { display: inline-flex } would otherwise beat the hidden attribute. */
+[hidden] { display: none !important; }
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  /* Keeps focus, skip-link and anchor targets clear of the sticky header (about 63px tall). */
+  scroll-padding-top: 76px;
+}
 
 body {
   margin: 0;
@@ -98,7 +107,7 @@ button, input { font: inherit; color: inherit; }
 .skip:focus { top: 12px; color: #fff; }
 
 /* ------------------------------------------------------------------ */
-/* Cabeçalho                                                            */
+/* Header                                                             */
 /* ------------------------------------------------------------------ */
 
 .hdr {
@@ -188,7 +197,7 @@ button, input { font: inherit; color: inherit; }
 .clock-tz { font-size: 11px; color: var(--muted); }
 
 /* ------------------------------------------------------------------ */
-/* Página                                                               */
+/* Page                                                               */
 /* ------------------------------------------------------------------ */
 
 .page {
@@ -212,7 +221,7 @@ button, input { font: inherit; color: inherit; }
 }
 
 /* ------------------------------------------------------------------ */
-/* Fita de manchetes                                                    */
+/* Headline tape                                                      */
 /* ------------------------------------------------------------------ */
 
 .tape {
@@ -249,7 +258,7 @@ button, input { font: inherit; color: inherit; }
   gap: 7px;
   min-height: 36px;
   padding: 0 12px;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--control-border);
   border-radius: 8px;
   background: transparent;
   color: var(--text-2);
@@ -258,13 +267,15 @@ button, input { font: inherit; color: inherit; }
   white-space: nowrap;
   cursor: pointer;
 }
-.toggle:hover { border-color: var(--border-hover); color: var(--text); }
+.toggle:hover { border-color: var(--control-border-hover); color: var(--text); }
 .toggle[aria-pressed="true"] {
   border-color: var(--purple);
   background: var(--purple-wash);
   color: var(--text);
 }
-.toggle:disabled { cursor: not-allowed; color: var(--muted); border-style: dashed; }
+.toggle:disabled,
+.toggle[aria-disabled="true"] { cursor: not-allowed; color: var(--muted); border-style: dashed; }
+.toggle[aria-disabled="true"]:hover { border-color: var(--control-border); color: var(--muted); }
 .toggle .ico { width: 16px; height: 16px; flex: none; }
 .toggle[aria-pressed="true"] .ico { color: var(--purple-text); }
 #sound-btn .ico-on { display: none; }
@@ -284,7 +295,7 @@ button, input { font: inherit; color: inherit; }
 .chip {
   min-height: 34px;
   padding: 0 14px;
-  border: 1px solid var(--chip-border);
+  border: 1px solid var(--control-border);
   border-radius: 999px;
   background: transparent;
   color: var(--text-2);
@@ -293,7 +304,7 @@ button, input { font: inherit; color: inherit; }
   white-space: nowrap;
   cursor: pointer;
 }
-.chip:hover { border-color: var(--border-hover); color: var(--text); }
+.chip:hover { border-color: var(--control-border-hover); color: var(--text); }
 .chip[aria-pressed="true"] {
   background: var(--purple-btn);
   border-color: var(--purple-btn);
@@ -325,13 +336,13 @@ button, input { font: inherit; color: inherit; }
   width: 100%;
   height: 36px;
   padding: 0 10px 0 34px;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--control-border);
   border-radius: 8px;
   background: var(--bg);
   font-size: 14px;
 }
 .search input::placeholder { color: var(--muted); opacity: 1; }
-.search input:hover { border-color: var(--border-hover); }
+.search input:hover { border-color: var(--control-border-hover); }
 .search input:focus-visible { outline-offset: 0; border-color: var(--purple); }
 
 .count {
@@ -342,14 +353,15 @@ button, input { font: inherit; color: inherit; }
   white-space: nowrap;
 }
 
-/* Estados (carregando / vazio / erro) */
+/* States (loading / empty / error) */
 .feed-state {
   border-top: 1px solid var(--border);
   padding: 40px var(--row-x) 48px;
   text-align: center;
   color: var(--muted);
 }
-.feed-state[hidden] { display: none; }
+/* A live region: kept in the page while empty (no hidden/display:none) so new messages are read. */
+.feed-state:empty { padding: 0; border: 0; }
 .feed-state .fs-title {
   margin: 0 auto 6px;
   max-width: none;
@@ -385,7 +397,7 @@ button, input { font: inherit; color: inherit; }
   animation: blink 1.2s ease-in-out infinite;
 }
 
-/* Separadores de dia */
+/* Day separators */
 .day-head {
   margin: 0;
   display: flex;
@@ -406,7 +418,7 @@ button, input { font: inherit; color: inherit; }
 
 .rows { list-style: none; margin: 0; padding: 0; }
 
-/* Linha da fita */
+/* Tape row */
 .row {
   --row-bg: transparent;
   position: relative;
@@ -521,7 +533,7 @@ button, input { font: inherit; color: inherit; }
 }
 .t-expl-lbl { color: var(--purple-text); font-weight: 600; }
 
-/* Chegada de manchete nova */
+/* New headline arriving */
 .row.is-new { animation: arrive 0.42s cubic-bezier(.2, .7, .3, 1), flash 4.5s ease-out; }
 .t-expl.is-fresh { animation: arrive 0.42s cubic-bezier(.2, .7, .3, 1), fade-in 0.6s ease-out; }
 
@@ -542,7 +554,7 @@ button, input { font: inherit; color: inherit; }
 @keyframes blink { 50% { opacity: 0.25; } }
 
 /* ------------------------------------------------------------------ */
-/* Coluna lateral                                                       */
+/* Side column                                                        */
 /* ------------------------------------------------------------------ */
 
 .side { grid-area: side; min-width: 0; }
@@ -620,25 +632,24 @@ button, input { font: inherit; color: inherit; }
 .ag-item.is-past .ag-title { color: var(--muted); font-weight: 400; }
 .ag-item.is-past .ag-src { background: transparent; color: var(--muted); box-shadow: inset 0 0 0 1px var(--border); }
 
-/* Fontes */
+/* Sources */
 .ai-line {
   margin: 0;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 8px;
   padding: 10px 16px;
   border-bottom: 1px solid var(--border-soft);
   font-size: 13px;
 }
+/* Inline, so a long "IA desligada" text wraps under the dot instead of leaving it alone on a line. */
 .ai-dot {
+  display: inline-block;
   width: 8px; height: 8px;
+  margin-right: 8px;
   border-radius: 50%;
-  align-self: center;
+  vertical-align: 1px;
   background: var(--purple);
 }
 .ai-dot.off { background: var(--red); }
-.ai-model { font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); overflow-wrap: anywhere; }
+.ai-model { margin-left: 8px; font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); overflow-wrap: anywhere; }
 .ai-line.is-off { color: var(--text-2); }
 
 .src-list { list-style: none; margin: 0; padding: 6px 0 8px; }
@@ -677,12 +688,12 @@ button, input { font: inherit; color: inherit; }
   overflow-wrap: anywhere;
 }
 
-/* Rodapé */
+/* Footer */
 .foot { grid-area: foot; padding: 0 4px; }
 .foot p { margin: 0; font-size: 12px; line-height: 1.5; color: var(--muted); }
 
 /* ------------------------------------------------------------------ */
-/* Responsivo                                                           */
+/* Responsive                                                         */
 /* ------------------------------------------------------------------ */
 
 @media (max-width: 1023.98px) {
@@ -730,6 +741,7 @@ button, input { font: inherit; color: inherit; }
 
 @media (max-width: 680px) {
   :root { --gutter: 16px; --row-x: 16px; }
+  html { scroll-padding-top: 72px; }
 
   .hdr-inner { min-height: 56px; padding-top: 8px; padding-bottom: 8px; gap: 10px; }
   .brand { font-size: 21px; }
@@ -740,7 +752,7 @@ button, input { font: inherit; color: inherit; }
 
   .side-body { grid-template-columns: minmax(0, 1fr); }
 
-  /* Fita sangra até a borda: o texto alinha com o respiro de 16px. */
+  /* The tape bleeds to the edge: text lines up with the 16px gutter. */
   .tape { margin: 0 calc(var(--gutter) * -1); border-radius: 0; border-left: 0; border-right: 0; }
   .tape-head { padding-top: 16px; padding-bottom: 12px; }
   .tape-head h1 { font-size: 27px; }

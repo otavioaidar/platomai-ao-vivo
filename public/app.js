@@ -1,21 +1,22 @@
 /*
- * PlatomAI Ao Vivo — front-end estático (ES module, sem dependências).
+ * PlatomAI Ao Vivo — static front end (ES module, no dependencies).
  *
- * Seções:
- *   1. Configuração
- *   2. Utilitários (DOM seguro, armazenamento, datas no fuso de Brasília)
- *   3. Estado + normalização dos dados da API
- *   4. Fita de manchetes (renderização com reaproveitamento de nós)
- *   5. Alertas (som WebAudio, notificações, aria-live, contador no título)
- *   6. Sincronização (GET /api/headlines) e tempo real (SSE /api/stream)
- *   7. Coluna lateral (agenda e fontes)
- *   8. Controles, relógio e inicialização
+ * Sections:
+ *   1. Configuration
+ *   2. Utilities (safe DOM, storage, dates in Brasília time)
+ *   3. State + normalization of API data
+ *   4. Headline tape (rendering that reuses nodes)
+ *   5. Alerts (WebAudio sound, notifications, aria-live, unread count in the title)
+ *   6. Sync (GET /api/headlines) and real time (SSE /api/stream)
+ *   7. Side column (agenda and sources)
+ *   8. Controls, clock and startup
  *
- * Nenhum texto vindo da API passa por innerHTML: tudo vira nó de texto.
+ * No text from the API goes through innerHTML: everything becomes a text node.
+ * The page runs under a strict CSP: no inline scripts or style attributes (element.style is fine).
  */
 
 // ---------------------------------------------------------------------------
-// 1. Configuração
+// 1. Configuration
 // ---------------------------------------------------------------------------
 
 const TZ = 'America/Sao_Paulo';
@@ -28,13 +29,14 @@ const API = {
   status: '/api/status',
 };
 
-const MAX_ITEMS = 600;                 // teto de manchetes mantidas em memória
-const AGENDA_EVERY = 5 * 60_000;       // recarrega a agenda
-const STATUS_EVERY = 60_000;           // recarrega o status das fontes
-const RELATIVE_EVERY = 30_000;         // atualiza "há 2 min", "em 1h05"
-const POLL_WHILE_DOWN = 30_000;        // sem SSE, consulta a lista neste ritmo
-const STREAM_SILENCE_LIMIT = 75_000;   // sem nenhum evento (nem ping) → reconecta
-const REPLAY_ALERT_WINDOW = 10 * 60_000; // itens recuperados após queda: só alerta se recentes
+const MAX_ITEMS = 600;                 // cap on headlines kept in memory
+const AGENDA_EVERY = 5 * 60_000;       // reload the agenda
+const STATUS_EVERY = 60_000;           // reload source status
+const RELATIVE_EVERY = 30_000;         // refresh "há 2 min", "em 1h05"
+const POLL_WHILE_DOWN = 30_000;        // without SSE, fetch the list at this pace
+const STREAM_OPEN_LIMIT = 15_000;      // stream not open by then (proxy holding it) → poll and retry
+const STREAM_SILENCE_LIMIT = 75_000;   // no event at all (not even a ping) → reconnect
+const REPLAY_ALERT_WINDOW = 10 * 60_000; // items recovered after an outage: alert only if recent
 
 const KEYS = {
   filter: 'platomai-ao-vivo:filtro',
@@ -52,16 +54,25 @@ const CONN_TEXT = {
   connecting: 'Conectando…',
   live: 'Ao vivo',
   reconnecting: 'Reconectando…',
-  offline: 'Offline',
+  offline: 'Sem conexão',
 };
 
+// Raw source errors (often Node's English messages) → short Portuguese text; the raw one stays in a tooltip.
+const SOURCE_ERRORS = [
+  [/\bHTTP (\d{3})\b/, (m) => `A fonte respondeu com erro ${m[1]}`],
+  [/timeout|timed out|tempo esgotado|ETIMEDOUT|abort/i, () => 'Tempo de resposta esgotado'],
+  [/CERT|SSL|TLS|[Cc]ertifica/, () => 'Falha no certificado de segurança'],
+  [/fetch failed|ECONN|ENOTFOUND|EAI_AGAIN|EHOSTUNREACH|ENETUNREACH|socket|network|sem resposta/i, () => 'A fonte não respondeu'],
+  [/XML|JSON|parse|Unexpected token|inesperad|inválid/i, () => 'Resposta em formato inesperado'],
+];
+
 // ---------------------------------------------------------------------------
-// 2. Utilitários
+// 2. Utilities
 // ---------------------------------------------------------------------------
 
 const $ = (sel) => document.querySelector(sel);
 
-/** Cria um elemento. Filhos string viram nós de texto (nunca HTML). */
+/** Creates an element. String children become text nodes (never HTML). */
 function h(tag, attrs, ...children) {
   const node = document.createElement(tag);
   if (attrs) {
@@ -78,19 +89,19 @@ function h(tag, attrs, ...children) {
   return node;
 }
 
-/** localStorage pode não existir ou lançar exceção (modo privado, bloqueio). */
+/** localStorage may be missing or throw (private mode, blocked storage). */
 const store = {
   get(key) {
     try { return window.localStorage.getItem(key); } catch { return null; }
   },
   set(key, value) {
-    try { window.localStorage.setItem(key, value); } catch { /* sem armazenamento: segue sem lembrar */ }
+    try { window.localStorage.setItem(key, value); } catch { /* no storage: carry on without remembering */ }
   },
 };
 
 const str = (v) => (typeof v === 'string' ? v : '');
 
-/** Minúsculas e sem acento, para a busca aceitar "inflacao" e "inflação". */
+/** Lowercase without accents, so the search matches both "inflacao" and "inflação". */
 const fold = (s) => s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
 
 function parseJSON(text) {
@@ -123,7 +134,7 @@ async function getJSON(url, timeoutMs = 15_000) {
   }
 }
 
-// Datas: tudo exibido no horário de Brasília, independentemente do fuso do aparelho.
+// Dates: always shown in Brasília time, whatever the device's time zone.
 const fmt = {
   hms: new Intl.DateTimeFormat('pt-BR', { timeZone: TZ, hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }),
   hm: new Intl.DateTimeFormat('pt-BR', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }),
@@ -131,7 +142,7 @@ const fmt = {
   weekday: new Intl.DateTimeFormat('pt-BR', { timeZone: 'UTC', weekday: 'short' }),
 };
 
-/** Chave do dia (AAAA-MM-DD) no fuso de Brasília. */
+/** Day key (YYYY-MM-DD) in Brasília time. */
 function dayKey(ts) {
   const p = {};
   for (const { type, value } of fmt.ymd.formatToParts(ts)) p[type] = value;
@@ -143,7 +154,7 @@ function keyToUTC(key) {
   return Date.UTC(y, m - 1, d);
 }
 
-/** Rótulo de dia: Hoje / Ontem / Amanhã / dd/mm (com dia da semana ao lado). */
+/** Day label: Hoje / Ontem / Amanhã / dd/mm (with the weekday beside it). */
 function dayLabel(key, todayKey) {
   const offset = Math.round((keyToUTC(todayKey) - keyToUTC(key)) / 86_400_000);
   const [, m, d] = key.split('-');
@@ -152,6 +163,13 @@ function dayLabel(key, todayKey) {
   if (offset === 1) return { main: 'Ontem', sub: ddmm };
   if (offset === -1) return { main: 'Amanhã', sub: ddmm };
   return { main: ddmm, sub: fmt.weekday.format(keyToUTC(key)).replace('.', '') };
+}
+
+/** "hoje 09:00", "amanhã 09:00" or "23/10 09:00", so a later day never reads as today. */
+function dayTime(ev, todayKey) {
+  const main = dayLabel(ev.day, todayKey).main;
+  const day = main === 'Hoje' ? 'hoje' : main === 'Amanhã' ? 'amanhã' : main;
+  return `${day} ${fmt.hm.format(ev.ts)}`;
 }
 
 function since(ts, now) {
@@ -178,8 +196,17 @@ function until(ts, now) {
 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
+/** Short Portuguese text for a raw source error. */
+function sourceErrorText(raw) {
+  for (const [re, text] of SOURCE_ERRORS) {
+    const m = raw.match(re);
+    if (m) return text(m);
+  }
+  return 'Falha na leitura da fonte';
+}
+
 // ---------------------------------------------------------------------------
-// 3. Estado e normalização
+// 3. State and normalization
 // ---------------------------------------------------------------------------
 
 const el = {
@@ -188,6 +215,7 @@ const el = {
   clock: $('#clock'),
   feed: $('#feed'),
   feedState: $('#feed-state'),
+  feedTitle: $('#feed-title'),
   count: $('#count'),
   chips: [...document.querySelectorAll('[data-filter]')],
   search: $('#q'),
@@ -206,15 +234,16 @@ const el = {
 };
 
 const notifSupported = 'Notification' in window;
+let notifBroken = false; // Chrome on Android: the API exists but the constructor throws (service worker only)
 
 const state = {
-  items: new Map(),    // id → manchete normalizada
-  sorted: null,        // cache da lista ordenada (mais nova primeiro)
+  items: new Map(),    // id → normalized headline
+  sorted: null,        // cached sorted list (newest first)
   filter: 'tudo',
-  terms: [],           // termos da busca, já sem acento
-  loaded: false,       // primeira carga de /api/headlines concluída
+  terms: [],           // search terms, already without accents
+  loaded: false,       // first /api/headlines load done
   loadFailed: false,
-  sound: false,        // sempre começa desligado (política de autoplay)
+  sound: false,        // always starts off (autoplay policy)
   notify: false,
   unread: 0,
   agenda: null,
@@ -241,6 +270,8 @@ function normalizeHeadline(raw) {
     region: str(raw.region),
     urgency: raw.urgency === 'urgente' || raw.urgency === 'alta' ? raw.urgency : 'normal',
     headline,
+    // AI-off drafts of English sources carry the original title ("[EN] ...").
+    lang: raw.lang === 'en' || (raw.method === 'rascunho' && headline.startsWith('[EN] ')) ? 'en' : null,
     explainer: str(raw.explainer).trim() || null,
     topics: Array.isArray(raw.topics) ? raw.topics.filter((t) => typeof t === 'string') : [],
     url: safeUrl(raw.url),
@@ -304,20 +335,20 @@ const passesFilter = (it) => FILTERS[state.filter](it);
 const passesSearch = (it) => state.terms.every((t) => it.haystack.includes(t));
 
 // ---------------------------------------------------------------------------
-// 4. Fita de manchetes
+// 4. Headline tape
 // ---------------------------------------------------------------------------
 
 const rowCache = new Map();   // id → { item, node }
-const dayCache = new Map();   // AAAA-MM-DD → { node, main, sub, list }
-const fresh = new Set();          // ids que acabaram de chegar (destaque)
-const freshExplainer = new Set(); // ids cujo "PlatomAI explica" acabou de chegar
+const dayCache = new Map();   // YYYY-MM-DD → { node, main, sub, list }
+const fresh = new Set();          // ids that just arrived (highlight)
+const freshExplainer = new Set(); // ids whose "PlatomAI explica" just arrived
 let lastStateSig = '';
 let renderQueued = false;
 
 function scheduleRender() {
   if (renderQueued) return;
   renderQueued = true;
-  // Em aba oculta o rAF pausa: a fita é montada quando o leitor volta.
+  // rAF pauses in a hidden tab: the tape is built when the reader comes back.
   requestAnimationFrame(() => {
     renderQueued = false;
     renderFeed();
@@ -333,7 +364,7 @@ function buildRow(item) {
   const text = h('p', { class: 't-text' });
   if (item.urgency === 'urgente') text.append(h('span', { class: 'flag flag-urgente' }, 'URGENTE'), ' ');
   else if (item.urgency === 'alta') text.append(h('span', { class: 'flag flag-alta' }, 'ALTA'), ' ');
-  text.append(h('span', { class: 't-head' }, item.headline));
+  text.append(h('span', { class: 't-head', lang: item.lang }, item.headline));
   if (item.status === 'revisar') text.append(' ', h('span', { class: 'badge' }, 'em revisão'));
   if (item.method === 'rascunho') text.append(' ', h('span', { class: 'badge' }, 'rascunho (IA desligada)'));
 
@@ -362,7 +393,7 @@ function buildRow(item) {
     node.classList.add('is-new');
     const done = () => node.classList.remove('is-new');
     node.addEventListener('animationend', (ev) => { if (ev.animationName === 'flash') done(); });
-    setTimeout(done, 6000); // garante a limpeza com animações desligadas
+    setTimeout(done, 6000); // still cleans up with animations off
   }
   return node;
 }
@@ -388,7 +419,7 @@ function dayFor(key) {
   return day;
 }
 
-/** Deixa os filhos de `parent` iguais a `wanted`, mexendo no mínimo de nós. */
+/** Makes the children of `parent` equal to `wanted`, touching as few nodes as possible. */
 function reconcile(parent, wanted) {
   const keep = new Set(wanted);
   for (const child of [...parent.children]) if (!keep.has(child)) child.remove();
@@ -403,6 +434,7 @@ function setText(node, text) {
   if (node.textContent !== text) node.textContent = text;
 }
 
+/** Renders the tape and returns how many headlines are shown out of the total. */
 function renderFeed() {
   const all = sortedItems();
   const visible = all.filter((it) => passesFilter(it) && passesSearch(it));
@@ -433,7 +465,7 @@ function renderFeed() {
   fresh.clear();
   freshExplainer.clear();
 
-  // Se uma atualização trocou a linha que tinha o foco, devolve o foco ao link novo.
+  // If an update replaced the row that had focus, give focus back to the new link.
   if (focusedId && !el.feed.contains(document.activeElement)) {
     rowCache.get(focusedId)?.node.querySelector('.t-src')?.focus({ preventScroll: true });
   }
@@ -443,6 +475,13 @@ function renderFeed() {
     : visible.length === all.length ? plural(all.length, 'manchete', 'manchetes')
       : `${visible.length} de ${all.length}`;
   renderFeedState(visible.length, all.length);
+  return { shown: visible.length, total: all.length };
+}
+
+/** Tells screen readers what a search or filter left; the no-match case is read from #feed-state. */
+function announceResults({ shown, total }) {
+  if (!shown) return;
+  announce(shown === total ? plural(total, 'manchete', 'manchetes') : `${shown} de ${total} manchetes`);
 }
 
 function renderFeedState(shown, total) {
@@ -455,15 +494,19 @@ function renderFeedState(shown, total) {
   if (sig === lastStateSig) return;
   lastStateSig = sig;
 
+  // The box is a live region (role=status): it stays in the page, empty, so screen readers read new content.
   const box = el.feedState;
-  box.hidden = !kind;
   box.dataset.kind = kind;
   if (!kind) { box.replaceChildren(); return; }
 
   const title = (text) => h('p', { class: 'fs-title' }, text);
   const button = (text, onClick) => {
     const b = h('button', { type: 'button', class: 'fs-btn' }, text);
-    b.addEventListener('click', onClick);
+    b.addEventListener('click', async () => {
+      await onClick();
+      // The click may re-render the box and remove this button: keep keyboard focus near the tape.
+      if (!b.isConnected && (!document.activeElement || document.activeElement === document.body)) el.feedTitle.focus();
+    });
     return b;
   };
 
@@ -473,7 +516,7 @@ function renderFeedState(shown, total) {
     box.replaceChildren(
       title('Não foi possível carregar as manchetes'),
       h('p', null, 'Verifique sua conexão. Vamos tentar de novo automaticamente.'),
-      button('Tentar agora', () => syncHeadlines()),
+      button('Tentar agora', async () => { await syncHeadlines(); renderFeed(); }),
     );
   } else if (kind === 'empty') {
     box.replaceChildren(
@@ -486,16 +529,18 @@ function renderFeedState(shown, total) {
       title(query ? `Nada encontrado para “${query}”` : 'Nenhuma manchete neste filtro'),
       h('p', null, 'Novas manchetes que combinarem com o filtro aparecem aqui sozinhas.'),
       button('Limpar busca e filtros', () => {
+        const hadQuery = el.search.value.trim() !== '';
         el.search.value = '';
         state.terms = [];
-        setFilter('tudo');
+        announceResults(setFilter('tudo'));
+        (hadQuery ? el.search : el.chips.find((c) => c.dataset.filter === 'tudo'))?.focus();
       }),
     );
   }
 }
 
 // ---------------------------------------------------------------------------
-// 5. Alertas
+// 5. Alerts
 // ---------------------------------------------------------------------------
 
 const audio = { ctx: null, lastAt: 0, lastRank: 0 };
@@ -523,7 +568,7 @@ function tone(ctx, at, freq, dur = 0.14, peak = 0.22) {
   osc.stop(at + dur + 0.02);
 }
 
-/** Urgente: dois bipes. Alta: um bipe. Rajadas viram um único aviso. */
+/** Urgente: two beeps. Alta: one beep. Bursts become a single alert. */
 function beep(urgency) {
   const rank = urgency === 'urgente' ? 2 : urgency === 'alta' ? 1 : 0;
   if (!rank || !state.sound) return;
@@ -549,15 +594,24 @@ function announce(text) {
   announceTimer = setTimeout(() => { el.announcer.textContent = text; }, 150);
 }
 
+/** Some mobile browsers (Chrome on Android) only notify through a service worker: the constructor throws. */
+function showNotification(title, options) {
+  try {
+    return new Notification(title, options);
+  } catch {
+    notifBroken = true;
+    state.notify = false;
+    store.set(KEYS.notify, '0');
+    renderToggles();
+    return null;
+  }
+}
+
 function notifyUrgent(item) {
   if (!state.notify || !notifSupported || Notification.permission !== 'granted') return;
-  if (document.visibilityState === 'visible' && document.hasFocus()) return; // já está vendo a fita
-  try {
-    const n = new Notification(`URGENTE · ${item.tag}`, { body: item.headline, tag: `platomai-${item.id}`, lang: 'pt-BR' });
-    n.addEventListener('click', () => { window.focus(); n.close(); });
-  } catch {
-    /* alguns navegadores móveis só notificam via service worker */
-  }
+  if (document.visibilityState === 'visible' && document.hasFocus()) return; // already looking at the tape
+  const n = showNotification(`URGENTE · ${item.tag}`, { body: item.headline, tag: `platomai-${item.id}`, lang: item.lang || 'pt-BR' });
+  n?.addEventListener('click', () => { window.focus(); n.close(); });
 }
 
 function updateTitle() {
@@ -570,12 +624,12 @@ function resetUnread() {
   updateTitle();
 }
 
-/** Uma manchete realmente nova chegou (ao vivo ou recuperada após queda). */
+/** A genuinely new headline arrived (live, or recovered after an outage). */
 function onArrival(item, { replay = false } = {}) {
   if (item.backfill) return;
   fresh.add(item.id);
   if (replay && Date.now() - item.ts > REPLAY_ALERT_WINDOW) return;
-  if (!passesFilter(item)) return; // alertas seguem o filtro escolhido (a busca não conta)
+  if (!passesFilter(item)) return; // alerts follow the chosen filter (the search does not count)
 
   if (document.visibilityState === 'hidden') {
     state.unread += 1;
@@ -589,10 +643,10 @@ function onArrival(item, { replay = false } = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// 6. Sincronização e tempo real
+// 6. Sync and real time
 // ---------------------------------------------------------------------------
 
-/** Junta uma lista completa (snapshot) ao que já temos, por id. */
+/** Merges a full list (snapshot) into what we have, by id. */
 function mergeSnapshot(list, { replay }) {
   for (const raw of list) {
     const item = normalizeHeadline(raw);
@@ -608,7 +662,7 @@ function mergeSnapshot(list, { replay }) {
   trimItems();
 }
 
-/** Troca uma manchete existente mantendo sua posição na fita. */
+/** Replaces an existing headline, keeping its place in the tape. */
 function replaceItem(prev, item) {
   item.sortTs = prev.sortTs;
   item.day = prev.day;
@@ -633,10 +687,10 @@ function ingestHeadline(raw) {
 function ingestUpdate(raw) {
   if (!raw || raw.id == null) return;
   const prev = state.items.get(String(raw.id));
-  // O evento pode trazer o objeto inteiro ou só os campos alterados.
+  // The event may carry the whole object or only the changed fields.
   const item = normalizeHeadline(prev ? { ...prev.raw, ...raw } : raw);
   if (!item) return;
-  if (!prev) putItem(item); // atualização de algo que ainda não tínhamos: entra sem alerta
+  if (!prev) putItem(item); // update for something we did not have yet: added without an alert
   else if (prev.sig !== item.sig) replaceItem(prev, item);
   else return;
   scheduleRender();
@@ -647,7 +701,7 @@ let syncAgain = false;
 let loadRetryTimer = 0;
 let loadRetries = 0;
 
-/** GET /api/headlines + merge. Chamadas simultâneas viram no máximo mais uma. */
+/** GET /api/headlines + merge. Concurrent calls collapse into at most one more. */
 function syncHeadlines() {
   if (syncPromise) {
     syncAgain = true;
@@ -679,7 +733,7 @@ function syncHeadlines() {
   return syncPromise;
 }
 
-const live = { es: null, everOpen: false, failures: 0, retryTimer: 0, silenceTimer: 0, pollTimer: 0 };
+const live = { es: null, everOpen: false, failures: 0, retryTimer: 0, openTimer: 0, silenceTimer: 0, pollTimer: 0 };
 
 function setConn(mode) {
   if (el.conn.dataset.state === mode) return;
@@ -691,8 +745,26 @@ function armSilenceWatch() {
   clearTimeout(live.silenceTimer);
   live.silenceTimer = setTimeout(() => {
     live.failures += 1;
+    startPolling(); // the reconnect may hang too
     connect();
   }, STREAM_SILENCE_LIMIT);
+}
+
+/**
+ * A proxy or antivirus that buffers text/event-stream holds the request: neither 'open' nor 'error'
+ * ever fires. If the stream is not open in time, poll the list and retry with backoff.
+ */
+function armOpenWatch(es) {
+  clearTimeout(live.openTimer);
+  live.openTimer = setTimeout(() => {
+    if (es !== live.es) return;
+    es.close();
+    live.failures += 1;
+    setConn(navigator.onLine === false || live.failures >= 3 ? 'offline' : 'reconnecting');
+    startPolling();
+    syncHeadlines();
+    scheduleReconnect();
+  }, STREAM_OPEN_LIMIT);
 }
 
 function startPolling() {
@@ -712,6 +784,7 @@ function scheduleReconnect() {
 
 function connect() {
   clearTimeout(live.retryTimer);
+  clearTimeout(live.openTimer);
   clearTimeout(live.silenceTimer);
   live.es?.close();
   if (navigator.onLine === false || live.failures >= 3) setConn('offline');
@@ -726,15 +799,17 @@ function connect() {
     return;
   }
   live.es = es;
+  armOpenWatch(es);
   const current = (fn) => (ev) => { if (es === live.es) fn(ev); };
 
   es.addEventListener('open', current(() => {
+    clearTimeout(live.openTimer);
     live.everOpen = true;
     live.failures = 0;
     setConn('live');
     stopPolling();
     armSilenceWatch();
-    syncHeadlines(); // cobre o que saiu enquanto estávamos fora (merge por id)
+    syncHeadlines(); // covers what came out while we were away (merge by id)
   }));
 
   es.addEventListener('headline', current((ev) => {
@@ -755,15 +830,20 @@ function connect() {
   es.addEventListener('error', current(() => {
     clearTimeout(live.silenceTimer);
     live.failures += 1;
-    // CONNECTING: o navegador tenta sozinho. CLOSED: precisamos reabrir.
-    if (es.readyState === EventSource.CLOSED) scheduleReconnect();
+    // CONNECTING: the browser retries on its own (watched in case that retry hangs). CLOSED: we must reopen.
+    if (es.readyState === EventSource.CLOSED) {
+      clearTimeout(live.openTimer);
+      scheduleReconnect();
+    } else {
+      armOpenWatch(es);
+    }
     setConn(navigator.onLine === false || live.failures >= 3 ? 'offline' : 'reconnecting');
     startPolling();
   }));
 }
 
 // ---------------------------------------------------------------------------
-// 7. Coluna lateral
+// 7. Side column
 // ---------------------------------------------------------------------------
 
 async function loadAgenda() {
@@ -831,8 +911,8 @@ function renderAgenda() {
   }
   el.agenda.replaceChildren(...parts);
 
-  // Resumo no botão recolhível (telas estreitas).
-  if (next) el.sideNext.textContent = `Próximo: ${fmt.hm.format(next.ts)} · ${next.title}`;
+  // Summary on the collapsible button (narrow screens): the only agenda text shown there by default.
+  if (next) el.sideNext.textContent = `Próximo: ${dayTime(next, todayKey)} · ${next.title}`;
   else if (events) el.sideNext.textContent = 'Sem divulgações pendentes';
   else el.sideNext.textContent = state.agendaFailed ? 'Agenda indisponível' : 'Carregando agenda…';
 }
@@ -851,11 +931,12 @@ function renderStatus() {
 
   const on = status.ai.enabled;
   el.ai.className = `ai-line${on ? '' : ' is-off'}`;
-  el.ai.replaceChildren(
+  // replaceChildren() would print a null child as the text "null": drop it first.
+  el.ai.replaceChildren(...[
     h('span', { class: `ai-dot${on ? '' : ' off'}`, 'aria-hidden': 'true' }),
     h('span', null, on ? 'IA ligada' : 'IA desligada: manchetes saem como rascunho'),
     on && status.ai.model ? h('span', { class: 'ai-model' }, status.ai.model) : null,
-  );
+  ].filter(Boolean));
 
   el.sources.replaceChildren(...status.sources.map((src) => {
     const kind = src.error ? 'is-err' : src.okTs ? 'is-ok' : 'is-never';
@@ -865,7 +946,7 @@ function renderStatus() {
       h('span', { class: 'src-when' },
         h('span', { class: 'sr-only' }, src.okTs ? 'última leitura ' : ''),
         src.okTs ? since(src.okTs, now) : 'sem leitura'),
-      src.error ? h('p', { class: 'src-err', title: src.error }, h('span', { class: 'sr-only' }, 'Erro: '), src.error) : null);
+      src.error ? h('p', { class: 'src-err', title: src.error }, h('span', { class: 'sr-only' }, 'Erro: '), sourceErrorText(src.error)) : null);
   }));
 
   const failing = status.sources.filter((s) => s.error).length;
@@ -877,14 +958,14 @@ function renderStatus() {
 }
 
 // ---------------------------------------------------------------------------
-// 8. Controles, relógio e inicialização
+// 8. Controls, clock and startup
 // ---------------------------------------------------------------------------
 
 function setFilter(name) {
   state.filter = FILTERS[name] ? name : 'tudo';
   store.set(KEYS.filter, state.filter);
   for (const chip of el.chips) chip.setAttribute('aria-pressed', String(chip.dataset.filter === state.filter));
-  renderFeed();
+  return renderFeed();
 }
 
 function renderToggles() {
@@ -897,6 +978,14 @@ function renderToggles() {
     return;
   }
   el.notify.hidden = false;
+  if (notifBroken) {
+    // Stays visible and focusable (it may have just been clicked), but says it cannot work here.
+    el.notify.setAttribute('aria-pressed', 'false');
+    el.notify.setAttribute('aria-disabled', 'true');
+    el.notifyLabel.textContent = 'Notificações indisponíveis';
+    el.notify.title = 'Este navegador não mostra notificações a partir de uma página aberta';
+    return;
+  }
   const perm = Notification.permission;
   const on = state.notify && perm === 'granted';
   el.notify.setAttribute('aria-pressed', String(on));
@@ -907,8 +996,14 @@ function renderToggles() {
     : 'Aviso do navegador quando sair manchete urgente com a aba em segundo plano';
 }
 
+const NOTIFY_UNSUPPORTED = 'Notificações não são suportadas neste navegador.';
+
 async function toggleNotify() {
   if (!notifSupported) return;
+  if (notifBroken) {
+    announce(NOTIFY_UNSUPPORTED);
+    return;
+  }
   if (state.notify) {
     state.notify = false;
   } else {
@@ -916,8 +1011,18 @@ async function toggleNotify() {
     if (perm === 'default') {
       try { perm = await Notification.requestPermission(); } catch { perm = Notification.permission; }
     }
-    if (perm === 'granted') state.notify = true;
-    else if (perm === 'denied') announce('Notificações bloqueadas. Libere nas configurações do navegador.');
+    if (perm === 'granted') {
+      // A confirmation doubles as a support check: never show "ligadas" for alerts that cannot appear.
+      const n = showNotification(BASE_TITLE, { body: 'Notificações ativadas para manchetes urgentes.', tag: 'platomai-teste', silent: true, lang: 'pt-BR' });
+      if (!n) {
+        announce(NOTIFY_UNSUPPORTED);
+        return;
+      }
+      setTimeout(() => n.close(), 4000);
+      state.notify = true;
+    } else if (perm === 'denied') {
+      announce('Notificações bloqueadas. Libere nas configurações do navegador.');
+    }
   }
   store.set(KEYS.notify, state.notify ? '1' : '0');
   renderToggles();
@@ -926,7 +1031,7 @@ async function toggleNotify() {
 function toggleSound() {
   state.sound = !state.sound;
   if (state.sound) {
-    // O clique libera o áudio; um bipe curto confirma que está funcionando.
+    // The click unlocks audio; a short beep confirms it works.
     const ctx = audioContext();
     if (ctx) tone(ctx, ctx.currentTime + 0.03, 740, 0.09, 0.12);
   }
@@ -940,7 +1045,7 @@ function tick() {
   el.clock.dateTime = new Date(now).toISOString();
   const key = dayKey(now);
   if (key !== lastClockDay) {
-    // Virou o dia: "Hoje" passa a ser "Ontem".
+    // New day: "Hoje" becomes "Ontem".
     const first = !lastClockDay;
     lastClockDay = key;
     if (!first) { renderFeed(); renderAgenda(); }
@@ -948,46 +1053,46 @@ function tick() {
 }
 
 function init() {
-  // Preferências salvas
+  // Saved preferences
   const savedFilter = store.get(KEYS.filter);
   if (savedFilter && FILTERS[savedFilter]) state.filter = savedFilter;
   state.notify = store.get(KEYS.notify) === '1' && notifSupported && Notification.permission === 'granted';
   for (const chip of el.chips) chip.setAttribute('aria-pressed', String(chip.dataset.filter === state.filter));
 
-  // Filtros e busca
-  for (const chip of el.chips) chip.addEventListener('click', () => setFilter(chip.dataset.filter));
+  // Filters and search (results are announced; live updates to the tape are not)
+  for (const chip of el.chips) chip.addEventListener('click', () => announceResults(setFilter(chip.dataset.filter)));
   let searchTimer = 0;
   el.search.addEventListener('input', () => {
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => {
       state.terms = fold(el.search.value).split(/\s+/).filter(Boolean);
-      renderFeed();
+      announceResults(renderFeed());
     }, 120);
   });
 
-  // Som e notificações
+  // Sound and notifications
   el.sound.addEventListener('click', toggleSound);
   el.notify.addEventListener('click', toggleNotify);
   renderToggles();
 
-  // Coluna lateral recolhível (telas estreitas)
+  // Collapsible side column (narrow screens)
   el.sideToggle.addEventListener('click', () => {
     const open = el.side.dataset.open !== 'true';
     el.side.dataset.open = String(open);
     el.sideToggle.setAttribute('aria-expanded', String(open));
   });
 
-  // Contador de não lidas no título
+  // Unread count in the title
   window.addEventListener('focus', resetUnread);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') resetUnread();
   });
 
-  // Rede
+  // Network
   window.addEventListener('offline', () => setConn('offline'));
   window.addEventListener('online', () => { live.failures = 0; connect(); });
 
-  // Relógio alinhado ao segundo
+  // Clock aligned to the second
   tick();
   setTimeout(() => { tick(); setInterval(tick, 1000); }, 1000 - (Date.now() % 1000));
 

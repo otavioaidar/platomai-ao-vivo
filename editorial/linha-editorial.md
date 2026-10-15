@@ -1,6 +1,6 @@
 # Linha editorial do PlatomAI Ao Vivo
 
-Este arquivo é o "volante" da redação. A IA lê este texto antes de cada manchete. Mudou aqui, mudou a cobertura (o servidor relê o arquivo a cada minuto). Ele define **o que cobrir e o que destacar**. Os fatos sempre vêm da fonte.
+Este arquivo é o "volante" da redação. A IA lê este texto antes de cada manchete. Mudou aqui, mudou a cobertura (o servidor relê o arquivo sempre que ele é alterado e aplica a partir do próximo item). Ele define **o que cobrir e o que destacar**. Os fatos sempre vêm da fonte.
 
 ## Para quem escrevemos
 Investidor brasileiro, do iniciante ao profissional. A manchete serve ao profissional (rápida, precisa, com números). O "PlatomAI explica" serve ao iniciante (por que isso mexe com juros, dólar, bolsa ou o bolso).
@@ -14,16 +14,26 @@ Investidor brasileiro, do iniciante ao profissional. A manchete serve ao profiss
 6. Atividade e emprego: PIB, PNAD, varejo (PMC), serviços (PMS), indústria (PIM), IBC-Br, payroll.
 7. Crédito e bancos: relatórios do BC, estabilidade financeira.
 
-## O que destacar como urgente
-- Qualquer decisão de juros (Copom, Fed, BCE).
-- Dado oficial principal fora do esperado.
-- Intervenção cambial nova ou mudança de regra que afete preços de mercado.
-- Fala de presidente de banco central com sinal novo sobre os próximos passos dos juros.
+## Urgência
+A IA segue só esta regra (o prompt fixo não traz outra).
+- **urgente**:
+  - Qualquer decisão de juros (Copom, Fed, BCE).
+  - Divulgação de dado oficial principal: IPCA, PIB, payroll e inflação ao consumidor dos EUA (CPI).
+  - Intervenção cambial nova ou mudança de regra que afete preços de mercado.
+  - Fala de presidente de banco central com sinal novo sobre os próximos passos dos juros.
+- **alta**: relevante para o pregão do dia (os demais dados oficiais, como IPCA-15, desemprego, varejo, serviços e indústria; atas; leilões).
+- **normal**: contexto.
+- Não julgue se um dado veio acima ou abaixo do esperado: isso só conta quando a própria fonte traz a expectativa. Os dados numéricos com mediana Focus usam modelo fixo, que já marca a surpresa.
 
 ## O que não publicar
 - Agenda institucional, eventos, prêmios, concursos, nomeações administrativas.
 - Estudos acadêmicos e textos para discussão, a menos que tragam número novo de política econômica.
 - Repetição de fato que já saiu em manchete recente.
+
+## Fatos e números
+- Só o que está na fonte. Sem contas: se a fonte não diz de quanto foi o corte ou a alta, a manchete dá só o novo nível ("Copom reduz Selic para 13,75% ao ano").
+- O "PlatomAI explica" explica o mecanismo geral (por que isso costuma mexer com juros, dólar, bolsa ou o bolso), sem fato, causa, recorde ou comparação que a fonte não traga.
+- Manchete de até 200 caracteres; acima de 240 ela vai para revisão humana.
 
 ## Tom
 Neutro, direto e factual. Sem adjetivos de opinião, sem torcida, sem previsão própria. A PlatomAI não recomenda compra ou venda de ativos.

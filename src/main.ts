@@ -3,7 +3,7 @@ import { Store } from "./db.ts";
 import { Hub } from "./hub.ts";
 import { log } from "./log.ts";
 import { installExtraCAs } from "./net.ts";
-import { Pipeline } from "./pipeline.ts";
+import { Pipeline, keepRefreshed } from "./pipeline.ts";
 import { buildPublishers } from "./publishers/index.ts";
 import { createServer } from "./server.ts";
 import { officialFeeds } from "./sources/feeds.ts";
@@ -11,13 +11,18 @@ import { Agenda, SIDRA_SPECS, ibgeReleases, sidraSource } from "./sources/ibge.t
 import { ClaudeWriter, DraftWriter } from "./writer/ai.ts";
 import type { Writer } from "./writer/ai.ts";
 
+/** The IBGE calendar is retried every 2 min until it first loads, then refreshed every 30 min. */
+const AGENDA_RETRY_MS = 2 * 60 * 1000;
+const AGENDA_REFRESH_MS = 30 * 60 * 1000;
+/** Shutdown waits this long for writes in flight, and exits for sure before Docker's 10 s stop timeout. */
+const DRAIN_MS = 8000;
+const HARD_EXIT_MS = 9000;
+
 installExtraCAs();
 
 const store = new Store(config.dbPath);
 const hub = new Hub();
 const agenda = new Agenda();
-await agenda.refresh();
-const agendaTimer = setInterval(() => void agenda.refresh(), 30 * 60 * 1000);
 
 const writer: Writer = config.ai.enabled
   ? new ClaudeWriter({ model: config.ai.model, effort: config.ai.effort, editorialPath: config.editorialPath })
@@ -52,6 +57,16 @@ const server = createServer({
   statuses: () => pipeline.statuses(),
 });
 
+// The calendar loads in the background: a slow IBGE must not hold up the site or the other sources.
+const stopAgenda = keepRefreshed(
+  async () => {
+    await agenda.refresh();
+    return agenda.lastError === null;
+  },
+  AGENDA_REFRESH_MS,
+  AGENDA_RETRY_MS,
+);
+
 server.listen(config.port, config.host, () => {
   log.info(`PlatomAI Ao Vivo em http://localhost:${config.port}`, {
     ia: writer.enabled ? `${writer.model} (esforço ${config.ai.effort})` : "desligada (rascunhos)",
@@ -61,16 +76,21 @@ server.listen(config.port, config.host, () => {
   pipeline.start(sources);
 });
 
-function shutdown() {
+let closing = false;
+
+/** Stops polling, waits for writes and posts in flight, then closes the database. Items not finished stay queued. */
+async function shutdown() {
+  if (closing) process.exit(1); // a second signal does not wait
+  closing = true;
   log.info("encerrando…");
+  setTimeout(() => process.exit(0), HARD_EXIT_MS).unref();
+  stopAgenda();
   pipeline.stop();
-  clearInterval(agendaTimer);
   hub.close();
-  server.close(() => {
-    store.close();
-    process.exit(0);
-  });
-  setTimeout(() => process.exit(0), 3000).unref();
+  server.close();
+  if (!(await pipeline.drain(DRAIN_MS))) log.warn("encerrando com itens em andamento; serão retomados na próxima partida");
+  store.close();
+  process.exit(0);
 }
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
+process.on("SIGINT", () => void shutdown());
+process.on("SIGTERM", () => void shutdown());

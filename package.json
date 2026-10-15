@@ -5,7 +5,7 @@
   "description": "PlatomAI Ao Vivo: notícias rápidas do mercado, escritas por IA a partir de fontes oficiais.",
   "type": "module",
   "engines": {
-    "node": ">=24"
+    "node": ">=24.5"
   },
   "scripts": {
     "start": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/main.ts",

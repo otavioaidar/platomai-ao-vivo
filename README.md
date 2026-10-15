@@ -13,7 +13,7 @@ fontes oficiais ──► monitor (consulta a cada 2–120 s) ──► redator 
 
 ## Rodar
 
-Requer Node 24.
+Requer Node 24.5 ou mais novo.
 
 ```bash
 npm install
@@ -85,12 +85,43 @@ certs/               certificado intermediário que o servidor do IBGE não envi
 
 ## Colocar no ar
 
-Numa VM com Docker:
+Numa VM com Docker. A imagem usa Node 24 (24.5 ou mais novo), roda sem root e responde em `/healthz` para o Docker saber se o site está de pé.
 
 ```bash
-docker build -t platomai-ao-vivo .
-docker run -d --name aovivo --restart unless-stopped -p 80:8080 \
-  --env-file .env -v aovivo-data:/data platomai-ao-vivo
+cp .env.example .env    # preencha as chaves e o SITE_URL
+docker build --pull -t platomai-ao-vivo .
+docker run -d --name aovivo --restart unless-stopped \
+  -p 127.0.0.1:8080:8080 \
+  --env-file .env -e DB_PATH=/data/aovivo.db \
+  -v aovivo-data:/data \
+  -v "$PWD/editorial:/app/editorial:ro" \
+  --cap-drop ALL --security-opt no-new-privileges \
+  platomai-ao-vivo
 ```
 
-Na frente, um proxy com HTTPS (Caddy ou Nginx). No Nginx, desligue o buffer em `/api/stream` (`proxy_buffering off;`) para o ao vivo não atrasar.
+- **`SITE_URL`** tem que ser o endereço público com https (ex.: `https://aovivo.exemplo.com.br`). É o link que vai no Telegram, no Bluesky e no RSS.
+- **Banco:** fica no volume `aovivo-data` e sobrevive a `docker rm` e a imagens novas. É o histórico de tudo o que foi publicado: faça backup dele.
+- **Linha editorial:** vem da pasta `editorial/` da VM. Edite `linha-editorial.md` ali e a próxima manchete já usa o texto novo, sem refazer a imagem.
+- **Porta:** a 8080 só abre em 127.0.0.1 na VM. Quem vem de fora passa pelo proxy com HTTPS.
+
+Na frente, um proxy com HTTPS. O Caddy emite o certificado sozinho; o `/etc/caddy/Caddyfile` fica assim:
+
+```
+aovivo.exemplo.com.br {
+	reverse_proxy 127.0.0.1:8080 {
+		flush_interval -1
+	}
+}
+```
+
+No Nginx, desligue o buffer em `/api/stream` (`proxy_buffering off;`) para o ao vivo não atrasar e repasse o IP de quem acessa (`proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`). O servidor aceita até 2000 conexões ao vivo, 20 por IP (`SSE_MAX_CLIENTS`, `SSE_MAX_PER_IP`); sem esse cabeçalho, só o limite total vale.
+
+Vindo de uma versão anterior, que rodava como root e, com o `.env` de exemplo antigo, gravava o banco dentro do contêiner: copie o banco para o volume e passe o volume para o usuário do contêiner antes de subir a versão nova.
+
+```bash
+docker stop aovivo
+docker cp aovivo:/app/data/. ./dados-antigos/    # só se o banco ficou dentro do contêiner
+docker rm aovivo
+docker run --rm -u root -v aovivo-data:/data -v "$PWD/dados-antigos:/antigo:ro" platomai-ao-vivo \
+  sh -c 'cp -n /antigo/* /data/ 2>/dev/null; chown -R node:node /data'
+```

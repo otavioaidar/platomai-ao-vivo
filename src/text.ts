@@ -6,13 +6,15 @@ const NAMED: Record<string, string> = {
   aacute: "á", eacute: "é", iacute: "í", oacute: "ó", uacute: "ú", atilde: "ã", otilde: "õ",
   acirc: "â", ecirc: "ê", ocirc: "ô", agrave: "à", ccedil: "ç", Aacute: "Á", Eacute: "É",
   Iacute: "Í", Oacute: "Ó", Uacute: "Ú", Atilde: "Ã", Otilde: "Õ", Ccedil: "Ç", euro: "€",
+  frac14: "¼", frac12: "½", frac34: "¾", minus: "−",
 };
 
 export function decodeEntities(s: string): string {
-  return s.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, e: string) => {
+  return s.replace(/&(#x[0-9a-f]+|#\d+|[a-z][a-z0-9]*);/gi, (m, e: string) => {
     if (e[0] === "#") {
       const code = e[1] === "x" || e[1] === "X" ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
-      return Number.isFinite(code) ? String.fromCodePoint(code) : m;
+      // Out-of-range code points (a typo in a feed) stay as written instead of throwing.
+      return code >= 0 && code <= 0x10ffff ? String.fromCodePoint(code) : m;
     }
     return NAMED[e] ?? m;
   });
@@ -60,18 +62,17 @@ export function fmtPct(v: number, decimals = 2): string {
   return `${s}%`;
 }
 
-/** Every numeric value mentioned in a text, accepting both 1.234,56 (pt) and 1,234.56 (en). */
-export function numbersIn(text: string): number[] {
-  const out: number[] = [];
-  for (const m of text.matchAll(/\d+(?:[.,]\d+)*/g)) {
-    const raw = m[0];
-    const candidates = new Set<number>();
-    candidates.add(Number(raw.replace(/\./g, "").replace(",", "."))); // pt-BR reading
-    candidates.add(Number(raw.replace(/,/g, ""))); // en reading
-    candidates.add(Number(raw.replace(",", "."))); // bare decimal comma
-    for (const c of candidates) if (Number.isFinite(c)) out.push(c);
-  }
-  return out;
+/**
+ * Reads one number as written in `lang`: pt uses comma decimals and dot thousands (1.234,56),
+ * en the reverse (1,234.56). Only that reading counts, so "4,3" in an English text is 43.
+ */
+export function parseNumber(raw: string, lang: "pt" | "en"): number {
+  return lang === "pt" ? Number(raw.replace(/\./g, "").replace(",", ".")) : Number(raw.replace(/,/g, ""));
+}
+
+/** Every number written in digits in a text, read as `lang` writes numbers. */
+export function numbersIn(text: string, lang: "pt" | "en" = "pt"): number[] {
+  return [...text.matchAll(/\d+(?:[.,]\d+)*/g)].map((m) => parseNumber(m[0], lang)).filter(Number.isFinite);
 }
 
 /** Cuts text to a limit on a word boundary, adding an ellipsis. */

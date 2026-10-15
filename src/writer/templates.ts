@@ -11,10 +11,17 @@ function signed(v: number, decimals = 2): string {
   return fmtPct(v, decimals);
 }
 
+/** A value in hundredths exactly as shown with 2 decimals ("0,82" -> 82). */
+function cents(v: number): number {
+  return Number(fmtNum(v, 2).replace(/[.,]/g, ""));
+}
+
 function consensusPhrase(value: number, consensus: number | null): { text: string; surprise: number } {
   if (consensus === null) return { text: "", surprise: 0 };
-  const diff = Math.round((value - consensus) * 100) / 100;
-  const ref = `mediana Focus (${signed(consensus)})`;
+  // Compare the numbers as displayed, so the word always matches what the reader sees.
+  const c = cents(consensus);
+  const diff = (cents(value) - c) / 100;
+  const ref = `mediana Focus (${signed(c / 100)})`;
   if (diff > 0) return { text: `, acima da ${ref}`, surprise: diff };
   if (diff < 0) return { text: `, abaixo da ${ref}`, surprise: diff };
   return { text: `, em linha com a ${ref}`, surprise: 0 };
@@ -40,11 +47,14 @@ function priceIndex(rel: IndicatorRelease, baseUrgency: Urgency): Draft {
   };
 }
 
+/** Unemployment over a rolling quarter, compared as IBGE does: with the quarter before (no shared month) and a year earlier. */
 function unemployment(rel: IndicatorRelease): Draft {
   const v = rel.values.taxa;
   const prev = rel.previous.taxa;
+  const yearAgo = rel.previous.taxa_ano_anterior;
   let headline = `Taxa de desemprego fica em ${fmtNum(v, 1)}% no trimestre ${shortLabel(rel.periodLabel)}`;
   if (prev !== undefined) headline += `; trimestre anterior (${shortLabel(rel.previousPeriodLabel)}): ${fmtNum(prev, 1)}%`;
+  if (yearAgo !== undefined) headline += `; mesmo trimestre de ${Number(rel.period.slice(0, 4)) - 1}: ${fmtNum(yearAgo, 1)}%`;
   return {
     publish: true,
     urgency: "alta",

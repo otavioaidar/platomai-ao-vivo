@@ -16,9 +16,11 @@ for (const src of sources) {
     const items = await src.poll();
     const first = items[0];
     console.log(`\n[${src.id}] ${items.length} itens em ${Date.now() - t0} ms`);
+    const hot = src.nextHotAt?.(new Date());
+    if (hot) console.log(`  próxima janela rápida: ${new Date(hot).toISOString()}`);
     if (!first) continue;
     const item = src.enrich ? await src.enrich(first) : first;
-    console.log(`  ${item.publishedAt} | ${item.title}`);
+    console.log(`  ${item.publishedAt}${item.stale ? " (antigo: só histórico)" : ""} | ${item.title}`);
     console.log(`  ${item.url}`);
     console.log(`  corpo (${item.body.length} chars): ${item.body.slice(0, 220).replace(/\n/g, " / ")}`);
     if (item.data) console.log("  modelo fixo:", renderIndicator(item.data)?.headline);

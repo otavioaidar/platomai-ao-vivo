@@ -1,15 +1,47 @@
 import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { Headline } from "./types.ts";
+import type { StatementSync } from "node:sqlite";
+import type { Headline, RawItem } from "./types.ts";
 
-/** SQLite store: which source items were already seen, and every headline written. */
+/** How long a write waits for another connection's lock (e.g. the sqlite3 CLI) before failing. */
+const BUSY_TIMEOUT_MS = 5000;
+
+/** A source item waiting to be written, kept in SQLite so a failure or a restart never loses it. */
+export interface PendingJob {
+  key: string;
+  sourceId: string;
+  item: RawItem;
+  backfill: boolean;
+  /** Failed attempts so far. */
+  attempts: number;
+  /** Epoch ms when the item was first detected (latency is measured from here, across retries). */
+  firstDetectedAt: number;
+}
+
+export interface NewJob {
+  key: string;
+  item: RawItem;
+  backfill: boolean;
+}
+
+interface PendingRow {
+  raw_key: string;
+  source_id: string;
+  item_json: string;
+  backfill: number;
+  attempts: number;
+  first_detected_at: number;
+}
+
+/** SQLite store: which source items were already seen, what is still waiting to be written, and every headline. */
 export class Store {
   readonly db: DatabaseSync;
+  private readonly stmts = new Map<string, StatementSync>();
 
   constructor(file: string) {
     if (file !== ":memory:") fs.mkdirSync(path.dirname(file), { recursive: true });
-    this.db = new DatabaseSync(file);
+    this.db = new DatabaseSync(file, { timeout: BUSY_TIMEOUT_MS });
     this.db.exec(`
       PRAGMA journal_mode = WAL;
       CREATE TABLE IF NOT EXISTS seen (
@@ -18,6 +50,17 @@ export class Store {
         first_seen TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS ix_seen_source ON seen(source_id);
+      CREATE TABLE IF NOT EXISTS pending (
+        raw_key TEXT PRIMARY KEY,
+        source_id TEXT NOT NULL,
+        item_json TEXT NOT NULL,
+        backfill INTEGER NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        next_attempt_at INTEGER NOT NULL,
+        first_detected_at INTEGER NOT NULL,
+        last_error TEXT
+      );
+      CREATE INDEX IF NOT EXISTS ix_pending_due ON pending(source_id, next_attempt_at);
       CREATE TABLE IF NOT EXISTS headlines (
         id TEXT PRIMARY KEY,
         published_at TEXT NOT NULL,
@@ -28,31 +71,97 @@ export class Store {
     `);
   }
 
+  /** Prepared statements are compiled once and reused. */
+  private stmt(sql: string): StatementSync {
+    let s = this.stmts.get(sql);
+    if (!s) {
+      s = this.db.prepare(sql);
+      this.stmts.set(sql, s);
+    }
+    return s;
+  }
+
+  /** Runs `fn` in one write transaction: all of it is stored, or none of it. */
+  tx<T>(fn: () => T): T {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const out = fn();
+      this.db.exec("COMMIT");
+      return out;
+    } catch (err) {
+      if (this.db.isTransaction) this.db.exec("ROLLBACK");
+      throw err;
+    }
+  }
+
   isSeen(rawKey: string): boolean {
-    return this.db.prepare("SELECT 1 FROM seen WHERE raw_key = ?").get(rawKey) !== undefined;
+    return this.stmt("SELECT 1 FROM seen WHERE raw_key = ?").get(rawKey) !== undefined;
   }
 
   markSeen(rawKey: string, sourceId: string): void {
-    this.db
-      .prepare("INSERT OR IGNORE INTO seen (raw_key, source_id, first_seen) VALUES (?, ?, ?)")
-      .run(rawKey, sourceId, new Date().toISOString());
+    this.stmt("INSERT OR IGNORE INTO seen (raw_key, source_id, first_seen) VALUES (?, ?, ?)").run(rawKey, sourceId, new Date().toISOString());
   }
 
   hasSeenAny(sourceId: string): boolean {
-    return this.db.prepare("SELECT 1 FROM seen WHERE source_id = ? LIMIT 1").get(sourceId) !== undefined;
+    return this.stmt("SELECT 1 FROM seen WHERE source_id = ? LIMIT 1").get(sourceId) !== undefined;
+  }
+
+  /** Marks new items seen and queues the ones to write, in the same transaction. */
+  admit(sourceId: string, seenKeys: string[], jobs: NewJob[], detectedAt: number): void {
+    this.tx(() => {
+      for (const key of seenKeys) this.markSeen(key, sourceId);
+      for (const j of jobs) {
+        this.stmt(
+          `INSERT OR IGNORE INTO pending (raw_key, source_id, item_json, backfill, attempts, next_attempt_at, first_detected_at)
+           VALUES (?, ?, ?, ?, 0, ?, ?)`,
+        ).run(j.key, sourceId, JSON.stringify(j.item), j.backfill ? 1 : 0, detectedAt, detectedAt);
+      }
+    });
+  }
+
+  /** Queued items of a source whose next attempt is due, oldest first. */
+  duePending(sourceId: string, now: number): PendingJob[] {
+    const rows = this.stmt(
+      `SELECT raw_key, source_id, item_json, backfill, attempts, first_detected_at FROM pending
+       WHERE source_id = ? AND next_attempt_at <= ? ORDER BY first_detected_at, rowid`,
+    ).all(sourceId, now) as unknown as PendingRow[];
+    return rows.map((r) => ({
+      key: r.raw_key,
+      sourceId: r.source_id,
+      item: JSON.parse(r.item_json) as RawItem,
+      backfill: r.backfill === 1,
+      attempts: r.attempts,
+      firstDetectedAt: r.first_detected_at,
+    }));
+  }
+
+  /** Every queued item (for status and tests). */
+  pendingCount(): number {
+    return (this.stmt("SELECT COUNT(*) AS n FROM pending").get() as { n: number }).n;
+  }
+
+  /** Records a failed attempt and when to try again. */
+  retryPending(key: string, attempts: number, nextAttemptAt: number, error: string): void {
+    this.stmt("UPDATE pending SET attempts = ?, next_attempt_at = ?, last_error = ? WHERE raw_key = ?").run(attempts, nextAttemptAt, error, key);
+  }
+
+  /** Stores the final outcome of a queued item (a headline, or null when it was discarded) and removes it from the queue. */
+  finish(key: string, h: Headline | null): void {
+    this.tx(() => {
+      if (h) this.save(h);
+      this.stmt("DELETE FROM pending WHERE raw_key = ?").run(key);
+    });
   }
 
   save(h: Headline): void {
-    this.db
-      .prepare(
-        `INSERT INTO headlines (id, published_at, status, json) VALUES (?, ?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET published_at = excluded.published_at, status = excluded.status, json = excluded.json`,
-      )
-      .run(h.id, h.publishedAt, h.status, JSON.stringify(h));
+    this.stmt(
+      `INSERT INTO headlines (id, published_at, status, json) VALUES (?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET published_at = excluded.published_at, status = excluded.status, json = excluded.json`,
+    ).run(h.id, h.publishedAt, h.status, JSON.stringify(h));
   }
 
   get(id: string): Headline | null {
-    const row = this.db.prepare("SELECT json FROM headlines WHERE id = ?").get(id) as { json: string } | undefined;
+    const row = this.stmt("SELECT json FROM headlines WHERE id = ?").get(id) as { json: string } | undefined;
     return row ? (JSON.parse(row.json) as Headline) : null;
   }
 
@@ -60,19 +169,21 @@ export class Store {
     const sql = includeReview
       ? "SELECT json FROM headlines ORDER BY published_at DESC LIMIT ?"
       : "SELECT json FROM headlines WHERE status = 'publicado' ORDER BY published_at DESC LIMIT ?";
-    const rows = this.db.prepare(sql).all(limit) as { json: string }[];
+    const rows = this.stmt(sql).all(limit) as { json: string }[];
     return rows.map((r) => JSON.parse(r.json) as Headline);
   }
 
-  /** Recent headlines from the same tag, used so the writer does not repeat a fact already published. */
+  /**
+   * Recent public headlines from the same tag, so the writer does not repeat a fact already published.
+   * Headlines waiting for review never went public, so they are left out.
+   */
   recentByTag(tag: string, sinceIso: string, limit = 15): Headline[] {
-    const rows = this.db
-      .prepare("SELECT json FROM headlines WHERE published_at >= ? ORDER BY published_at DESC LIMIT 200")
-      .all(sinceIso) as { json: string }[];
-    return rows
-      .map((r) => JSON.parse(r.json) as Headline)
-      .filter((h) => h.tag === tag)
-      .slice(0, limit);
+    const rows = this.stmt(
+      `SELECT json FROM headlines
+       WHERE json_extract(json, '$.tag') = ? AND status = 'publicado' AND published_at >= ?
+       ORDER BY published_at DESC LIMIT ?`,
+    ).all(tag, sinceIso, limit) as { json: string }[];
+    return rows.map((r) => JSON.parse(r.json) as Headline);
   }
 
   close(): void {
