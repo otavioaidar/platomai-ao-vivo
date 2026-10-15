@@ -23,7 +23,9 @@ npm start
 
 Abra http://localhost:8080. Na primeira vez, o site mostra as últimas manchetes de cada fonte como histórico e passa a publicar o que surgir dali em diante.
 
-Atrás de um proxy corporativo, use `npm run dev` (liga `NODE_USE_ENV_PROXY=1`).
+Atrás de um proxy corporativo, use `npm run dev` (liga `NODE_USE_ENV_PROXY=1`); para os comandos abaixo, rode com `NODE_USE_ENV_PROXY=1` na frente (ex.: `NODE_USE_ENV_PROXY=1 npm run probe`).
+
+Valores inválidos no `.env` não derrubam o site: o servidor avisa no log e usa o padrão. `POLL_SCALE` aceita vírgula (`0,5`).
 
 Outros comandos:
 
@@ -36,21 +38,28 @@ Outros comandos:
 
 ## Fontes no ar
 
+Horários de Brasília. As janelas rápidas ficam perto de quando a fonte costuma publicar, para chegar rápido sem sobrecarregar os servidores oficiais (os feeds do BCB não informam se mudaram, então cada consulta baixa o feed inteiro).
+
 | Fonte | Como | Intervalo |
 |---|---|---|
-| Copom: comunicados e atas | feed oficial do BCB | 15 s / 30 s |
-| BCB: notas à imprensa | feed oficial do BCB | 20 s |
-| IBGE: releases de todos os indicadores | API de notícias do IBGE | 30 s, 3 s em dia de divulgação |
-| IPCA, IPCA-15, desemprego (PNAD) | API SIDRA, com mediana Focus para o IPCA | 2 min, 2 s na janela da divulgação |
-| Agenda de divulgações | API de calendário do IBGE | 30 min |
+| Copom: comunicados | feed oficial do BCB | 5 min; 3 s às quartas, 18h–19h30 |
+| Copom: atas | feed oficial do BCB | 10 min; 5 s às terças, 7h55–8h30 |
+| BCB: notas à imprensa | feed oficial do BCB | 30 s |
+| IBGE: releases de todos os indicadores | API de notícias do IBGE | 30 s; 3 s de 90 s antes a 15 min depois de cada divulgação da agenda |
+| IPCA, IPCA-15, desemprego (PNAD) | API SIDRA; mediana Focus para o IPCA, buscada antes da divulgação | 2 min; 2 s na janela da divulgação, até sair o número |
+| Agenda de divulgações | API de calendário do IBGE | 30 min (2 min enquanto não carregar) |
 | Fed: política monetária e discursos | RSS oficial + texto da página | 20 s / 60 s |
 | BCE: comunicados, discursos, entrevistas | RSS oficial + texto da página | 30 s |
 
+`POLL_SCALE` multiplica todos os intervalos, inclusive os das janelas, nunca abaixo de 1 s.
+
 ## Como a IA escreve
 
-- **Números oficiais não passam pela IA.** IPCA, IPCA-15 e desemprego saem de um modelo fixo, direto dos dados do IBGE, comparados com a mediana do Focus. A IA só acrescenta depois o "PlatomAI explica".
+- **Números oficiais não passam pela IA.** IPCA, IPCA-15 e desemprego saem de um modelo fixo, direto dos dados do IBGE. O IPCA é comparado com a mediana do Focus; o desemprego, com o trimestre anterior sem sobreposição, como o IBGE faz. A IA só acrescenta depois o "PlatomAI explica".
 - **Textos** (Copom, notas, Fed, BCE, releases) são lidos pelo Claude, que decide se vira manchete, a urgência e escreve a manchete em português. O pedido usa saída estruturada (JSON validado), pensamento adaptativo, esforço configurável e fallback no servidor quando o modelo recusa.
-- **Checagem automática:** todo número da manchete precisa existir na fonte (aceita conversões como 25 pb = 0,25 p.p. e 3-3/4 = 3,75). Se falhar, a manchete vai para `revisar`, não aparece no site e não vai para as redes.
+- **Checagem automática:** todo número da manchete precisa existir na fonte, com a mesma unidade, escala e sinal (aceita só conversões explícitas, como 25 pb = 0,25 p.p. e 3-3/4 = 3,75). Se falhar, ou se a manchete passar de 240 caracteres, ela vai para `revisar`: não aparece no site (a menos que `SHOW_REVIEW=1`) e não vai para as redes.
+- **Nada se perde:** cada item novo entra numa fila no banco antes de ser escrito. Se a IA falhar ou o servidor reiniciar, ele é tentado de novo (15 s, 30 s, 1 min… até 30 min de intervalo). Depois de 6 h sem sucesso, ou se a IA recusar o item, ele fica em `revisar` com o título original da fonte.
+- **Notícia velha não vira urgente:** item que chega com mais de 6 h (por exemplo, depois de o servidor ficar fora do ar) entra só como histórico no site, sem alerta e sem ir para as redes.
 - **Linha editorial:** `editorial/linha-editorial.md` diz o que cobrir, o que destacar e o que ignorar. A IA lê esse arquivo em toda manchete e o servidor recarrega quando ele muda. É aqui que a gente direciona a cobertura. Os fatos sempre vêm da fonte.
 
 ## Endereços
@@ -63,6 +72,7 @@ Outros comandos:
 | `/api/agenda` | Agenda de divulgações |
 | `/api/status` | Saúde das fontes e da IA |
 | `/rss.xml` | RSS próprio |
+| `/healthz` | Saúde do processo (usado pelo HEALTHCHECK do Docker) |
 
 ## Estrutura
 
@@ -115,13 +125,3 @@ aovivo.exemplo.com.br {
 ```
 
 No Nginx, desligue o buffer em `/api/stream` (`proxy_buffering off;`) para o ao vivo não atrasar e repasse o IP de quem acessa (`proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`). O servidor aceita até 2000 conexões ao vivo, 20 por IP (`SSE_MAX_CLIENTS`, `SSE_MAX_PER_IP`); sem esse cabeçalho, só o limite total vale.
-
-Vindo de uma versão anterior, que rodava como root e, com o `.env` de exemplo antigo, gravava o banco dentro do contêiner: copie o banco para o volume e passe o volume para o usuário do contêiner antes de subir a versão nova.
-
-```bash
-docker stop aovivo
-docker cp aovivo:/app/data/. ./dados-antigos/    # só se o banco ficou dentro do contêiner
-docker rm aovivo
-docker run --rm -u root -v aovivo-data:/data -v "$PWD/dados-antigos:/antigo:ro" platomai-ao-vivo \
-  sh -c 'cp -n /antigo/* /data/ 2>/dev/null; chown -R node:node /data'
-```

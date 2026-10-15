@@ -86,6 +86,8 @@ export interface Headline {
   /** Milliseconds from detection at the source to publication on the site. */
   latencyMs: number;
   reviewReason?: string;
+  /** Set to "en" when the headline is the source's English title (AI off or review copy). */
+  lang?: "pt" | "en";
 }
 
 export const TOPICS = [

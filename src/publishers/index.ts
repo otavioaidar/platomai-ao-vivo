@@ -13,7 +13,8 @@ export interface Publisher {
 const RANK: Record<Urgency, number> = { normal: 0, alta: 1, urgente: 2 };
 
 export function meetsUrgency(h: Headline, min: Urgency): boolean {
-  return RANK[h.urgency] >= RANK[min];
+  // An unknown level (e.g. an unvalidated setting) falls back to "alta" instead of silently matching nothing.
+  return (RANK[h.urgency] ?? 0) >= (RANK[min] ?? RANK.alta);
 }
 
 function label(h: Headline): string {

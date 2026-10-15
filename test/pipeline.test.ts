@@ -10,7 +10,7 @@ import { Hub } from "../src/hub.ts";
 import { errorText } from "../src/log.ts";
 import { Pipeline, keepRefreshed, nextDelayMs, releaseText, retryDelayMs } from "../src/pipeline.ts";
 import type { Publisher } from "../src/publishers/index.ts";
-import type { WriteContext, Writer } from "../src/writer/ai.ts";
+import type { WriteContext, Writer, WriterDraft } from "../src/writer/ai.ts";
 import type { Draft, Headline, IndicatorRelease, RawItem, Source } from "../src/types.ts";
 
 const MIN = 60_000;
@@ -44,8 +44,8 @@ class FakeWriter implements Writer {
   gate: Promise<void> | null = null;
   recent: Headline[][] = [];
   explanation: string | null = null;
-  draft: (i: RawItem) => Draft = (i) => ({ publish: true, urgency: "urgente", headline: i.title, explainer: null, topics: ["juros"], reason: "", method: "ia" });
-  async write(i: RawItem, ctx: WriteContext): Promise<Draft | null> {
+  draft: (i: RawItem) => WriterDraft = (i) => ({ publish: true, urgency: "urgente", headline: i.title, explainer: null, topics: ["juros"], reason: "", method: "ia" });
+  async write(i: RawItem, ctx: WriteContext): Promise<WriterDraft | null> {
     this.calls++;
     this.recent.push(ctx.recent);
     if (this.gate) await this.gate;
@@ -441,4 +441,43 @@ test("error text includes the cause chain and never a Telegram token", () => {
   assert.equal(errorText(deep), "a (causa: b; causa: c; causa: d)");
   assert.equal(errorText(new Error("POST https://api.telegram.org/bot123456:AA-bb_cc/sendMessage 400")), "POST https://api.telegram.org/bot***/sendMessage 400");
   assert.equal(errorText("texto"), "texto");
+});
+
+test("a draft the writer flags (e.g. too long) goes to review and is not posted", async () => {
+  const { p, src, pub, store, writer, hub } = setup([[item("0", "Antigo", 60)], [item("0", "Antigo", 60), item("1", "Copom decide", 0)]]);
+  await p.runOnce(src);
+  writer.draft = (i) => ({ publish: true, urgency: "urgente", headline: i.title, explainer: null, topics: [], reason: "", method: "ia", review: "manchete longa (263 caracteres)" });
+  const [h] = await p.runOnce(src);
+  assert.equal(h.status, "revisar");
+  assert.equal(h.reviewReason, "manchete longa (263 caracteres)");
+  assert.equal(pub.sent.length, 0);
+  assert.equal(store.latest(10).length, 1, "only the backfilled item is public");
+  hub.close();
+});
+
+test("an item finally written more than 6 h after it was published is history, not breaking news", async () => {
+  const fresh = item("1", "Nota nova", 0);
+  const { p, src, pub, writer, clock, hub } = setup([[item("0", "Antigo", 60)], [item("0", "Antigo", 60), fresh], [item("0", "Antigo", 60), fresh]]);
+  await p.runOnce(src);
+  writer.failures = 1;
+  assert.deepEqual(await p.runOnce(src), []);
+  clock.t += 7 * HOUR;
+  const [h] = await p.runOnce(src);
+  assert.equal(h.headline, "Nota nova");
+  assert.equal(h.backfill, true);
+  assert.equal(h.publishedAt, fresh.publishedAt);
+  assert.equal(pub.sent.length, 0);
+  hub.close();
+});
+
+test("an English title kept as a review copy is marked lang=en for the page", async () => {
+  const en = { ...item("1", "Fed holds rates", 0), lang: "en" as const };
+  const { p, src, writer, hub } = setup([[item("0", "Antigo", 60)], [item("0", "Antigo", 60), en]]);
+  await p.runOnce(src);
+  writer.refuse = true;
+  const [h] = await p.runOnce(src);
+  assert.equal(h.status, "revisar");
+  assert.equal(h.headline, "[EN] Fed holds rates");
+  assert.equal(h.lang, "en");
+  hub.close();
 });

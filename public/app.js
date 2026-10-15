@@ -61,7 +61,8 @@ const CONN_TEXT = {
 const SOURCE_ERRORS = [
   [/\bHTTP (\d{3})\b/, (m) => `A fonte respondeu com erro ${m[1]}`],
   [/timeout|timed out|tempo esgotado|ETIMEDOUT|abort/i, () => 'Tempo de resposta esgotado'],
-  [/CERT|SSL|TLS|[Cc]ertifica/, () => 'Falha no certificado de segurança'],
+  // Certificate errors only: a reset during the TLS handshake is a connection failure, not a certificate one.
+  [/CERT_|certificate|certificado|self[- ]signed|UNABLE_TO_VERIFY|UNABLE_TO_GET_ISSUER/i, () => 'Falha no certificado de segurança'],
   [/fetch failed|ECONN|ENOTFOUND|EAI_AGAIN|EHOSTUNREACH|ENETUNREACH|socket|network|sem resposta/i, () => 'A fonte não respondeu'],
   [/XML|JSON|parse|Unexpected token|inesperad|inválid/i, () => 'Resposta em formato inesperado'],
 ];
@@ -366,7 +367,8 @@ function buildRow(item) {
   else if (item.urgency === 'alta') text.append(h('span', { class: 'flag flag-alta' }, 'ALTA'), ' ');
   text.append(h('span', { class: 't-head', lang: item.lang }, item.headline));
   if (item.status === 'revisar') text.append(' ', h('span', { class: 'badge' }, 'em revisão'));
-  if (item.method === 'rascunho') text.append(' ', h('span', { class: 'badge' }, 'rascunho (IA desligada)'));
+  // A review copy also uses the source title, but the AI is not off: "em revisão" says it already.
+  if (item.method === 'rascunho' && item.status !== 'revisar') text.append(' ', h('span', { class: 'badge' }, 'rascunho (IA desligada)'));
 
   node.append(
     h('time', { class: 't-time', datetime: new Date(item.ts).toISOString() }, fmt.hms.format(item.ts)),
@@ -760,11 +762,16 @@ function armOpenWatch(es) {
     if (es !== live.es) return;
     es.close();
     live.failures += 1;
-    setConn(navigator.onLine === false || live.failures >= 3 ? 'offline' : 'reconnecting');
+    setConn(isOffline() ? 'offline' : 'reconnecting');
     startPolling();
     syncHeadlines();
     scheduleReconnect();
   }, STREAM_OPEN_LIMIT);
+}
+
+/** Offline when the browser says so, or when the stream keeps failing and polling the list fails too. */
+function isOffline() {
+  return navigator.onLine === false || (live.failures >= 3 && state.loadFailed);
 }
 
 function startPolling() {
@@ -787,7 +794,7 @@ function connect() {
   clearTimeout(live.openTimer);
   clearTimeout(live.silenceTimer);
   live.es?.close();
-  if (navigator.onLine === false || live.failures >= 3) setConn('offline');
+  if (isOffline()) setConn('offline');
   else setConn(live.everOpen || live.failures ? 'reconnecting' : 'connecting');
 
   let es;
@@ -837,7 +844,7 @@ function connect() {
     } else {
       armOpenWatch(es);
     }
-    setConn(navigator.onLine === false || live.failures >= 3 ? 'offline' : 'reconnecting');
+    setConn(isOffline() ? 'offline' : 'reconnecting');
     startPolling();
   }));
 }

@@ -78,6 +78,11 @@ export function loadConfig(env: Env, warn: (msg: string) => void = (msg) => log.
     backfillPerSource: r.num("BACKFILL_PER_SOURCE", 3, 0, 50, true),
     /** Show headlines that failed the automatic check (status "revisar") on the public site. */
     showReview: r.bool("SHOW_REVIEW", false),
+    /** Live-stream (SSE) caps: total open streams and streams per viewer IP (0 turns the per-IP cap off). */
+    sse: {
+      maxClients: r.num("SSE_MAX_CLIENTS", 2000, 1, 100000, true),
+      maxPerIp: r.num("SSE_MAX_PER_IP", 20, 0, 10000, true),
+    },
     ai: {
       // The SDK also accepts ANTHROPIC_AUTH_TOKEN or an `ant auth login` profile; AI_ENABLED=1 forces it on.
       enabled: r.bool("AI_ENABLED", Boolean(env.ANTHROPIC_API_KEY?.trim() || env.ANTHROPIC_AUTH_TOKEN?.trim())),

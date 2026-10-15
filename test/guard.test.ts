@@ -38,6 +38,18 @@ const CASES: [string, string, "pt" | "en", string[]][] = [
   ["Fed corta juros em 0,75 p.p.", "lowered the rate by three-quarters of a percentage point", "en", []],
   ["Fed: desemprego vai a 4,3%", "the unemployment rate edged up to 4.3 percent", "en", []],
   ["Fed: desemprego vai a 43%", "the unemployment rate edged up to 4.3 percent", "en", ["43"]],
+  // Rate phrases need an article or "percentage"; bare "points" in the source are not p.p.
+  ["BCE corta juros em 0,25 p.p.", "Survey indicators for the third quarter point to weaker growth.", "en", ["0,25"]],
+  ["BCE corta juros em 0,50 p.p.", "Growth in the first half point to a slowdown.", "en", ["0,50"]],
+  ["Fed corta juros em 0,25 p.p.", "lowered the rate by a quarter-point", "en", []],
+  ["Copom eleva Selic em 3 p.p.", "O Copom destaca 3 pontos de atenção no cenário.", "pt", ["3"]],
+  ["Fed eleva juros em 10 p.p.", "The Fed presented a 10-point plan.", "en", ["10"]],
+  ["Fed eleva juros em 1/4 de ponto", FED_CUT, "en", []],
+  ["Copom reduz Selic em meio ponto", "O Copom decidiu reduzir a Selic em 0,50 ponto percentual.", "pt", []],
+  // Weekdays and "segundo o" are not ordinals; "cede" is a fall word.
+  ["Copom: 4 diretores votam pela alta", "A reunião terminou nesta quarta-feira.", "pt", ["4"]],
+  ["IBGE: 2 setores crescem", "Segundo o IBGE, os setores cresceram.", "pt", ["2"]],
+  ["IPCA cede 0,11% em agosto", IPCA_NEWS, "pt", []],
   ["Fed: dois diretores votam contra", "Two members voted against the action.", "en", []],
   ["Fed: três diretores votam contra", "Two members voted against the action.", "en", ["três"]],
   ["PIB dos EUA cresce 3,1% no 2º trimestre", "Real GDP increased 3.1 percent in the second quarter.", "en", []],

@@ -21,7 +21,7 @@ const HARD_EXIT_MS = 9000;
 installExtraCAs();
 
 const store = new Store(config.dbPath);
-const hub = new Hub();
+const hub = new Hub(undefined, config.sse);
 const agenda = new Agenda();
 
 const writer: Writer = config.ai.enabled
@@ -92,5 +92,8 @@ async function shutdown() {
   store.close();
   process.exit(0);
 }
+// Last resort: a stray error is logged instead of taking the site down; each loop and request has its own handler.
+process.on("uncaughtException", (err) => log.error("erro não tratado", err));
+process.on("unhandledRejection", (err) => log.error("promessa rejeitada sem tratamento", err));
 process.on("SIGINT", () => void shutdown());
 process.on("SIGTERM", () => void shutdown());

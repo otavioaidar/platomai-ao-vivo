@@ -1,5 +1,5 @@
 import { fetchJson, pollEvery } from "../net.ts";
-import { log } from "../log.ts";
+import { errorText, log } from "../log.ts";
 import type { IndicatorRelease, RawItem, Source } from "../types.ts";
 
 const S = 1000;
@@ -82,7 +82,7 @@ export class Agenda {
       this.lastOkAt = new Date().toISOString();
       this.lastError = null;
     } catch (err) {
-      this.lastError = (err as Error).message;
+      this.lastError = errorText(err);
       log.warn("agenda IBGE falhou", err);
     }
   }
@@ -340,10 +340,16 @@ export function sidraSource(spec: SidraSpec, agenda: Agenda, scale: number): Sou
       const rows = await fetchJson<SidraRow[]>(`https://apisidra.ibge.gov.br/values${spec.path}`);
       const rel = parseSidra(spec, rows);
       if (!rel) return [];
-      if (lastPeriod !== null && rel.period > lastPeriod) newPeriodAt = now.getTime();
+      // A period change this process watched happen is news whatever the agenda says (tables can update early).
+      // On the first poll after a start nothing was watched: that is when an old release could look new, so
+      // without an agenda to date it, it is history.
+      const watched = lastPeriod !== null && rel.period > lastPeriod;
+      if (watched) newPeriodAt = now.getTime();
       lastPeriod = rel.period;
       prefetchFocus(nextMonth(rel.period), now);
-      const { publishedAt, stale } = releaseTime(agenda, spec.calendarTitle, now);
+      const r = releaseTime(agenda, spec.calendarTitle, now);
+      const stale = watched ? false : agenda.lastOkAt === null || r.stale;
+      const publishedAt = watched && r.stale ? now.toISOString() : r.publishedAt;
       return [
         {
           sourceId: id,

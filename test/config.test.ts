@@ -98,3 +98,11 @@ test("addresses must be http(s) and lose the trailing slash", () => {
   assert.equal(bad.warnings.length, 1);
   assert.equal(load({ BLUESKY_SERVICE: "ftp://x" }).config.social.bluesky.service, "https://bsky.social");
 });
+
+test("SSE caps have defaults and accept 0 to turn the per-IP cap off", () => {
+  assert.deepEqual(loadConfig({}, () => {}).sse, { maxClients: 2000, maxPerIp: 20 });
+  assert.deepEqual(loadConfig({ SSE_MAX_CLIENTS: "500", SSE_MAX_PER_IP: "0" }, () => {}).sse, { maxClients: 500, maxPerIp: 0 });
+  const warnings: string[] = [];
+  assert.equal(loadConfig({ SSE_MAX_CLIENTS: "0" }, (m) => warnings.push(m)).sse.maxClients, 2000);
+  assert.equal(warnings.length, 1);
+});

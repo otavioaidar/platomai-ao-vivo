@@ -41,15 +41,15 @@ function isDateOnly(s: string, t: number): boolean {
 }
 
 /**
- * Source date as ISO. Some feeds (e.g. the ECB) stamp items with a midnight placeholder; when that day is
- * today or yesterday, the detection time is closer to the truth and keeps a new item from looking stale.
+ * Source date as ISO. Some feeds (e.g. the ECB) stamp items with a midnight placeholder; when that placeholder
+ * is less than a day old, the detection time is closer to the truth and keeps a new item from looking stale.
+ * Older placeholders keep their own day, so yesterday's item is still history.
  */
 function isoDate(s: string, now: Date): string {
   const t = new Date(s.trim()).getTime();
   if (Number.isNaN(t)) return now.toISOString();
-  // A midnight placeholder for today or yesterday (in its own offset) is less than 48 h old.
   const age = now.getTime() - t;
-  if (isDateOnly(s, t) && age >= 0 && age < 2 * DAY) return now.toISOString();
+  if (isDateOnly(s, t) && age >= 0 && age < DAY) return now.toISOString();
   return new Date(t).toISOString();
 }
 
@@ -148,8 +148,12 @@ export interface FeedSourceOptions {
   fetchArticle?: boolean;
 }
 
+/** How often an unchanged feed's entries are handed to the pipeline again (it skips the ones already seen). */
+const RESEND_MS = 5 * 60 * 1000;
+
 export function feedSource(o: FeedSourceOptions): Source {
   const windows = o.windows ?? [];
+  let lastFullAt = 0;
   return {
     id: o.id,
     name: o.name,
@@ -160,7 +164,11 @@ export function feedSource(o: FeedSourceOptions): Source {
     nextHotAt: (now) => nextWindowStart(windows, now),
     async poll() {
       const { changed, body } = await fetchConditional(o.url, 10_000, feedEntries);
-      if (!changed) return [];
+      // An unchanged feed is skipped, but every few minutes its entries are handed over again: if the pipeline
+      // failed to record them the first time (e.g. a locked database), they are not lost until the feed changes.
+      const now = Date.now();
+      if (!changed && now - lastFullAt < RESEND_MS) return [];
+      lastFullAt = now;
       return parseFeed(body).map(
         (e): RawItem => ({
           sourceId: o.id,

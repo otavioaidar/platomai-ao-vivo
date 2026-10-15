@@ -29,11 +29,24 @@ interface Num {
 const L = String.raw`\p{L}`;
 const word = (body: string, flags = "giu") => new RegExp(`(?<![${L}\\d])(?:${body})(?![${L}\\d])`, flags);
 
-const UNITS: [RegExp, Exclude<Unit, null>][] = [
-  [/^[\s-]*(?:pb|bps?|pontos?[\s-]+(?:base|básicos?)|basis[\s-]+points?)(?![\p{L}])/iu, "bp"],
-  [/^[\s-]*(?:p\.\s?p\.?|pp(?![\p{L}])|pontos?[\s-]+percentua(?:l|is)|percentage[\s-]+points?|pontos?(?![\p{L}])|points?(?![\p{L}]))/iu, "pp"],
-  [/^\s*(?:%|por\s+cento(?![\p{L}])|percent(?![\p{L}])|per\s+cent(?![\p{L}]))/iu, "pct"],
-];
+const BP: [RegExp, Exclude<Unit, null>] = [/^[\s-]*(?:pb|bps?|pontos?[\s-]+(?:base|básicos?)|basis[\s-]+points?)(?![\p{L}])/iu, "bp"];
+const PCT: [RegExp, Exclude<Unit, null>] = [/^\s*(?:%|por\s+cento(?![\p{L}])|percent(?![\p{L}])|per\s+cent(?![\p{L}]))/iu, "pct"];
+/**
+ * Units by role. In the headline, a bare "ponto" is the house style for p.p. ("em 0,5 ponto", "1/4 de ponto").
+ * In the source it must say percentual/percentage: "3 pontos de atenção" or "a 10-point plan" are not rates.
+ */
+const UNITS: Record<"source" | "text", [RegExp, Exclude<Unit, null>][]> = {
+  source: [
+    BP,
+    [/^[\s-]*(?:p\.\s?p\.?|pp(?![\p{L}])|(?:de[\s-]+)?pontos?[\s-]+percentua(?:l|is)|percentage[\s-]+points?)/iu, "pp"],
+    PCT,
+  ],
+  text: [
+    BP,
+    [/^[\s-]*(?:p\.\s?p\.?|pp(?![\p{L}])|(?:de[\s-]+)?pontos?[\s-]+percentua(?:l|is)|percentage[\s-]+points?|(?:de[\s-]+)?pontos?(?![\p{L}])|points?(?![\p{L}]))/iu, "pp"],
+    PCT,
+  ],
+};
 
 const SCALES: [RegExp, number][] = [
   [/^\s*(?:mil|thousand)(?![\p{L}])/iu, 1e3],
@@ -43,7 +56,7 @@ const SCALES: [RegExp, number][] = [
 ];
 
 const FALL = word(
-  "ca(?:i|em|iu|íram|iram)|queda|recu(?:a|am|ou|o)|baix(?:a|am|ou)|reduz(?:ir|iu|em)?|redução|cort(?:a|am|ou|e|ar)|" +
+  "ca(?:i|em|iu|íram|iram)|ced(?:e|em|eu|eram)|queda|recu(?:a|am|ou|o)|baix(?:a|am|ou)|reduz(?:ir|iu|em)?|redução|cort(?:a|am|ou|e|ar)|" +
     "deflação|retra(?:i|iu|ção)|encolh(?:e|eu)|diminu(?:i|iu|ição)|negativ[oa]s?|perd(?:a|e|eu)|" +
     "fell|fall(?:s|ing)?|declin(?:e|ed|es|ing)|decrease[ds]?|drop(?:s|ped)?|lower(?:ed)?|cuts?|reduc(?:e|ed|tion)|" +
     "contract(?:ed|ion)|deflation|minus|negative",
@@ -62,8 +75,9 @@ const PHRASES: Record<Lang, [string, number][]> = {
   ],
   en: [
     [String.raw`three[\s-]+quarters?(?:[\s-]+of[\s-]+a)?[\s-]+(?:percentage[\s-]+)?points?`, 0.75],
-    [String.raw`(?:(?:a|one)[\s-]+)?quarter(?:[\s-]+of[\s-]+a)?[\s-]+(?:percentage[\s-]+)?points?`, 0.25],
-    [String.raw`(?:(?:a|one)[\s-]+)?half(?:[\s-]+of)?(?:[\s-]+a)?[\s-]+(?:percentage[\s-]+)?points?`, 0.5],
+    // An article, "percentage" or the hyphenated compound is required: "third quarter point to weaker growth" is not a cut.
+    [String.raw`(?:(?:a|one)[\s-]+quarter(?:[\s-]+of[\s-]+a)?[\s-]+(?:percentage[\s-]+)?|quarter(?:[\s-]+of[\s-]+a)?[\s-]+percentage[\s-]+|quarter-)points?`, 0.25],
+    [String.raw`(?:(?:a|one)[\s-]+half(?:[\s-]+of)?(?:[\s-]+a)?[\s-]+(?:percentage[\s-]+)?|half(?:[\s-]+of)?(?:[\s-]+a)?[\s-]+percentage[\s-]+|half-)points?`, 0.5],
   ],
 };
 
@@ -97,9 +111,9 @@ const MONTHS: Record<Lang, string[]> = {
 
 const VULGAR: Record<string, number> = { "¼": 0.25, "½": 0.5, "¾": 0.75 };
 
-function unitAfter(text: string, end: number): Unit {
+function unitAfter(text: string, end: number, role: "source" | "text"): Unit {
   const tail = text.slice(end, end + 40);
-  return UNITS.find(([re]) => re.test(tail))?.[1] ?? null;
+  return UNITS[role].find(([re]) => re.test(tail))?.[1] ?? null;
 }
 
 function scaleAfter(text: string, end: number): number {
@@ -131,7 +145,7 @@ function numbers(text: string, lang: Lang, role: "source" | "text"): Num[] {
       const end = start + m[0].length;
       const made = make(m);
       if (!made) continue;
-      const unit = made.unit !== undefined ? made.unit : unitAfter(text, end);
+      const unit = made.unit !== undefined ? made.unit : unitAfter(text, end, role);
       out.push({
         raw: m[0].trim(),
         start,
@@ -175,13 +189,18 @@ function numbers(text: string, lang: Lang, role: "source" | "text"): Num[] {
   take(word(Object.keys(cardinals).join("|")), (m) => {
     const w = m[0].toLowerCase();
     const end = (m.index ?? 0) + m[0].length;
-    const counted = unitAfter(text, end) !== null || scaleAfter(text, end) !== 1;
+    const counted = unitAfter(text, end, role) !== null || scaleAfter(text, end) !== 1;
     if (!counted && ARTICLES.has(w)) return null;
     return { value: cardinals[w], kind: counted ? "num" : "word" };
   });
   if (role === "source") {
     const ordinals = ORDINALS[lang];
-    take(word(Object.keys(ordinals).join("|")), (m) => ({ value: ordinals[m[0].toLowerCase()], kind: "word", unit: null }));
+    // Weekdays ("quarta-feira") and "segundo o IBGE" are not ordinals.
+    take(word(Object.keys(ordinals).join("|")), (m) => {
+      const after = text.slice((m.index ?? 0) + m[0].length, (m.index ?? 0) + m[0].length + 8);
+      if (/^-feira/i.test(after) || /^\s+(?:o|a|os|as)\s/i.test(after)) return null;
+      return { value: ordinals[m[0].toLowerCase()], kind: "word", unit: null };
+    });
     const months = MONTHS[lang];
     take(word(months.join("|"), lang === "en" ? "gu" : "giu"), (m) => ({
       value: months.findIndex((mo) => mo.toLowerCase() === m[0].toLowerCase()) + 1, kind: "date", unit: null,

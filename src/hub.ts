@@ -1,4 +1,5 @@
 import net from "node:net";
+import { log } from "./log.ts";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 /** Caps on open live streams, so one client cannot hold thousands of sockets. maxPerIp 0 turns that cap off. */
@@ -35,10 +36,32 @@ PRIVATE.addSubnet("fe80::", 10, "ipv6");
 export function clientIp(req: IncomingMessage): string | null {
   const peer = req.socket.remoteAddress;
   if (!peer) return null;
-  if (!PRIVATE.check(peer, net.isIPv6(peer) ? "ipv6" : "ipv4")) return peer;
+  if (!PRIVATE.check(peer, net.isIPv6(peer) ? "ipv6" : "ipv4")) return ipKey(peer);
   const fwd = req.headers["x-forwarded-for"];
   const last = (Array.isArray(fwd) ? fwd.join(",") : (fwd ?? "")).split(",").pop()?.trim();
-  return last || null;
+  if (!last && !warnedNoForward && !LOOPBACK.has(peer)) {
+    warnedNoForward = true;
+    log.warn(`o proxy ${peer} não envia X-Forwarded-For: só o limite total de conexões ao vivo vale`);
+  }
+  return last ? ipKey(last) : null;
+}
+
+const LOOPBACK = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
+let warnedNoForward = false;
+
+/**
+ * Key for the per-IP cap. An IPv6 viewer usually holds a whole /64, so it is keyed by that prefix;
+ * otherwise one host could take every slot by rotating addresses. IPv4-mapped addresses read as IPv4.
+ */
+export function ipKey(ip: string): string {
+  const addr = ip.split("%")[0].toLowerCase();
+  if (addr.startsWith("::ffff:") && net.isIPv4(addr.slice(7))) return addr.slice(7);
+  if (!net.isIPv6(addr)) return addr;
+  const [head, tail] = addr.split("::");
+  const h = head ? head.split(":") : [];
+  const t = tail ? tail.split(":") : [];
+  const groups = addr.includes("::") ? [...h, ...Array(8 - h.length - t.length).fill("0"), ...t] : h;
+  return `${groups.slice(0, 4).map((g) => g.replace(/^0+(?=.)/, "")).join(":")}::/64`;
 }
 
 /** Server-Sent Events fan-out to every open browser tab. */

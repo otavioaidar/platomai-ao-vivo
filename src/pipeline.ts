@@ -8,7 +8,7 @@ import { renderIndicator } from "./writer/templates.ts";
 import type { PendingJob, Store } from "./db.ts";
 import type { Hub } from "./hub.ts";
 import type { Publisher } from "./publishers/index.ts";
-import type { Writer } from "./writer/ai.ts";
+import type { Writer, WriterDraft } from "./writer/ai.ts";
 import type { Draft, Headline, IndicatorRelease, RawItem, Source, SourceStatus, Status, Urgency } from "./types.ts";
 
 export interface PipelineOptions {
@@ -62,7 +62,8 @@ function ptNumber(v: number): string {
 export function releaseText(headline: string, rel: IndicatorRelease): string {
   const nums = [...Object.values(rel.values), ...Object.values(rel.previous)];
   if (rel.consensus !== null) nums.push(rel.consensus);
-  return [headline, rel.label, rel.periodLabel, rel.previousPeriodLabel ?? "", ...nums.map(ptNumber)].join("\n");
+  // Every value of the releases we cover is a percentage; the unit lets the guard accept integers like "5%".
+  return [headline, rel.label, rel.periodLabel, rel.previousPeriodLabel ?? "", ...nums.map((v) => `${ptNumber(v)}%`)].join("\n");
 }
 
 /**
@@ -238,27 +239,28 @@ export class Pipeline {
     return this.commit(job, this.build(src, item, job, draft));
   }
 
-  /** Turns a draft into a headline, sending AI text with numbers the source does not support to review. */
-  private build(src: Source, item: RawItem, job: PendingJob, draft: Draft): Headline {
-    let status: Status = "publicado";
-    let reviewReason: string | undefined;
+  /**
+   * Turns a draft into a headline. AI text goes to review when a number is not in the source or the writer
+   * flagged it (e.g. too long). An item written after STALE_MS (long retries, or a restart after downtime) is history.
+   */
+  private build(src: Source, item: RawItem, job: PendingJob, draft: WriterDraft): Headline {
+    const reasons: string[] = [];
     let explainer = draft.explainer;
     if (draft.method === "ia") {
       const sourceText = `${item.title}\n${item.body}`;
       const bad = unsupportedNumbers(draft.headline, sourceText, item.lang);
-      if (!draft.headline) {
-        status = "revisar";
-        reviewReason = "manchete vazia";
-      } else if (bad.length) {
-        status = "revisar";
-        reviewReason = `números sem respaldo na fonte: ${bad.join(", ")}`;
-      }
+      if (!draft.headline) reasons.push("manchete vazia");
+      else if (bad.length) reasons.push(`números sem respaldo na fonte: ${bad.join(", ")}`);
+      if (draft.review) reasons.push(draft.review);
       if (explainer && unsupportedNumbers(explainer, sourceText, item.lang).length) explainer = null;
     }
+    const status: Status = reasons.length ? "revisar" : "publicado";
+    const reviewReason = reasons.length ? reasons.join("; ") : undefined;
     const now = this.now();
+    const backfill = job.backfill || now - Date.parse(item.publishedAt) > STALE_MS;
     return {
       id: headlineId(item),
-      publishedAt: job.backfill ? item.publishedAt : new Date(now).toISOString(),
+      publishedAt: backfill ? item.publishedAt : new Date(now).toISOString(),
       sourcePublishedAt: item.publishedAt,
       detectedAt: new Date(job.firstDetectedAt).toISOString(),
       sourceId: src.id,
@@ -272,8 +274,9 @@ export class Pipeline {
       url: item.url,
       method: draft.method,
       status,
-      backfill: job.backfill,
+      backfill,
       latencyMs: now - job.firstDetectedAt,
+      ...(draft.method === "rascunho" && item.lang === "en" ? { lang: "en" as const } : {}),
       ...(reviewReason ? { reviewReason } : {}),
     };
   }

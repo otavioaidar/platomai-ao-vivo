@@ -1,4 +1,6 @@
 // Polls every source once and prints what it found, without writing anything. Usage: npm run probe
+// Behind a proxy, run it with NODE_USE_ENV_PROXY=1, like `npm run dev`.
+import { errorText } from "../src/log.ts";
 import { installExtraCAs } from "../src/net.ts";
 import { officialFeeds } from "../src/sources/feeds.ts";
 import { Agenda, SIDRA_SPECS, ibgeReleases, sidraSource } from "../src/sources/ibge.ts";
@@ -25,6 +27,6 @@ for (const src of sources) {
     console.log(`  corpo (${item.body.length} chars): ${item.body.slice(0, 220).replace(/\n/g, " / ")}`);
     if (item.data) console.log("  modelo fixo:", renderIndicator(item.data)?.headline);
   } catch (err) {
-    console.log(`\n[${src.id}] ERRO ${(err as Error).message}`);
+    console.log(`\n[${src.id}] ERRO ${errorText(err)}`);
   }
 }

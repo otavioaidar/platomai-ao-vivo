@@ -266,7 +266,7 @@ test("clientIp trusts X-Forwarded-For only from a private peer", () => {
   const req = (remoteAddress: string, xff?: string) =>
     ({ socket: { remoteAddress }, headers: xff ? { "x-forwarded-for": xff } : {} }) as unknown as IncomingMessage;
   assert.equal(clientIp(req("8.8.8.8", "1.2.3.4")), "8.8.8.8");
-  assert.equal(clientIp(req("2001:db8::1", "1.2.3.4")), "2001:db8::1");
+  assert.equal(clientIp(req("2001:db8::1", "1.2.3.4")), "2001:db8:0:0::/64"); // IPv6 viewers are keyed by their /64
   assert.equal(clientIp(req("::ffff:172.17.0.1", "1.1.1.1, 203.0.113.9")), "203.0.113.9");
   assert.equal(clientIp(req("127.0.0.1", "203.0.113.5")), "203.0.113.5");
   assert.equal(clientIp(req("10.0.0.2")), null);
@@ -293,4 +293,13 @@ test("drops a client that stops reading instead of buffering for it", async () =
     slow.close();
     srv.close();
   }
+});
+
+test("per-IP cap keys IPv6 viewers by their /64 and reads IPv4-mapped addresses as IPv4", async () => {
+  const { ipKey } = await import("../src/hub.ts");
+  assert.equal(ipKey("2001:db8:1:2:aaaa::1"), "2001:db8:1:2::/64");
+  assert.equal(ipKey("2001:0db8:0001:0002:ffff:ffff:ffff:ffff"), "2001:db8:1:2::/64");
+  assert.equal(ipKey("2001:db8::1"), "2001:db8:0:0::/64");
+  assert.equal(ipKey("::ffff:203.0.113.9"), "203.0.113.9");
+  assert.equal(ipKey("203.0.113.9"), "203.0.113.9");
 });

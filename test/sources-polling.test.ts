@@ -37,35 +37,35 @@ function rss(pubDates: string[]): string {
 // ---------------------------------------------------------------------------------------------
 // Feed dates
 
-test("a midnight placeholder from today or yesterday takes the detection time; real times are kept", () => {
+test("a midnight placeholder less than a day old takes the detection time; real times are kept", () => {
   const now = new Date("2026-10-14T07:45:00Z");
   const [ecb, real, ownMidnight, dateOnly, tenOClock, old, tomorrow] = parseFeed(
     rss([
       "Wed, 14 Oct 2026 02:00:00 +0200", // ECB: 00:00 UTC written in its own offset (live feed, 14/10)
       "Tue, 13 Oct 2026 20:30:00 +0200",
-      "Tue, 13 Oct 2026 00:00:00 -0300", // midnight as written, yesterday
+      "Tue, 13 Oct 2026 00:00:00 -0300", // midnight as written, 28 h ago: keeps its own day
       "2026-10-14",
       "Wed, 14 Oct 2026 10:00:00 +0200", // "00:00" inside "10:00:00" is not midnight
       "Mon, 12 Oct 2026 02:00:00 +0200", // two days ago: really old, keep it
-      "Thu, 15 Oct 2026 00:00:00 +0000", // tomorrow: not today or yesterday
+      "Thu, 15 Oct 2026 00:00:00 +0000", // tomorrow: a future date is kept
     ]),
     now,
   );
   assert.equal(ecb.publishedAt, now.toISOString());
   assert.equal(real.publishedAt, "2026-10-13T18:30:00.000Z");
-  assert.equal(ownMidnight.publishedAt, now.toISOString());
+  assert.equal(ownMidnight.publishedAt, "2026-10-13T03:00:00.000Z");
   assert.equal(dateOnly.publishedAt, now.toISOString());
   assert.equal(tenOClock.publishedAt, "2026-10-14T08:00:00.000Z");
   assert.equal(old.publishedAt, "2026-10-12T00:00:00.000Z");
   assert.equal(tomorrow.publishedAt, "2026-10-15T00:00:00.000Z");
 });
 
-test("yesterday's placeholder counts up to the end of today in its own offset", () => {
+test("a placeholder counts as new for 24 h, then keeps its own day so the pipeline treats it as history", () => {
   const stamp = "Tue, 13 Oct 2026 00:00:00 +0200"; // 12/10 22:00 UTC
-  const lateToday = parseFeed(rss([stamp]), new Date("2026-10-14T21:59:00Z"))[0]; // 23:59 on 14/10 in +0200
-  assert.equal(lateToday.publishedAt, "2026-10-14T21:59:00.000Z");
-  const dayAfter = parseFeed(rss([stamp]), new Date("2026-10-14T22:01:00Z"))[0]; // 00:01 on 15/10 in +0200
-  assert.equal(dayAfter.publishedAt, "2026-10-12T22:00:00.000Z");
+  const within = parseFeed(rss([stamp]), new Date("2026-10-13T21:59:00Z"))[0];
+  assert.equal(within.publishedAt, "2026-10-13T21:59:00.000Z");
+  const after = parseFeed(rss([stamp]), new Date("2026-10-13T22:01:00Z"))[0];
+  assert.equal(after.publishedAt, "2026-10-12T22:00:00.000Z");
 });
 
 test("BCB Atom dates with a real time are untouched", () => {
@@ -339,4 +339,38 @@ test("SIDRA drops back to the normal cadence once the new number is out", async 
 test("nextMonth rolls over the year", () => {
   assert.equal(nextMonth("202609"), "202610");
   assert.equal(nextMonth("202612"), "202701");
+});
+
+test("an unchanged feed is handed over again every 5 minutes, so a failed record is not lost", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-15T15:00:00Z") });
+  stubFetch(t, () => new Response(fixture("bcb-copom.xml")));
+  const src = feedSource({ id: "bcb-resend", name: "BCB", tag: "BCB", region: "BR", url: "https://bcb.test/resend", lang: "pt", intervalMs: 1000 });
+  const first = await src.poll();
+  assert.ok(first.length > 0);
+  assert.deepEqual(await src.poll(), []);
+  t.mock.timers.tick(5 * 60 * S + 1);
+  assert.equal((await src.poll()).length, first.length);
+  assert.deepEqual(await src.poll(), []);
+});
+
+test("SIDRA: a period change this process watched is news even if the agenda does not list it", async (t) => {
+  let last = "202608";
+  stubFetch(t, () => json(ipcaRows(last)));
+  const spec = SIDRA_SPECS.find((s) => s.id === "ipca")!;
+  const src = sidraSource(spec, agendaWith([]), 1); // agenda loaded, but no IPCA release in it
+  const [before] = await src.poll();
+  assert.equal(before.stale, true, "first poll after a start: no watched change, no agenda entry");
+  last = "202609";
+  const t0 = Date.now();
+  const [after] = await src.poll();
+  assert.equal(after.externalId, "ipca:202609");
+  assert.equal(after.stale, undefined);
+  assert.ok(Date.parse(after.publishedAt) >= t0 - 1000);
+});
+
+test("SIDRA: without an agenda, the first poll after a start is history", async (t) => {
+  stubFetch(t, () => json(ipcaRows("202609")));
+  const spec = SIDRA_SPECS.find((s) => s.id === "ipca")!;
+  const [first] = await sidraSource(spec, agendaWith([], false), 1).poll();
+  assert.equal(first.stale, true);
 });
