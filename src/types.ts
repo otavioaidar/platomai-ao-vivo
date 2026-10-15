@@ -28,6 +28,8 @@ export interface RawItem {
   publishedAt: string;
   lang: "pt" | "en";
   data?: IndicatorRelease;
+  /** The source knows this item is old news (e.g. a release from before an outage): show it as history only. */
+  stale?: boolean;
 }
 
 export interface SourceStatus {
@@ -46,6 +48,8 @@ export interface Source {
   intervalMs: number;
   /** Optional faster cadence, e.g. around a scheduled release. Returns null to use intervalMs. */
   hotIntervalMs?: (now: Date) => number | null;
+  /** Optional start (epoch ms) of the next hot window after `now`, so the scheduler can wake up in time for it. */
+  nextHotAt?: (now: Date) => number | null;
   poll(): Promise<RawItem[]>;
   /** Optional enrichment done only for new items (e.g. fetch the full article). */
   enrich?(item: RawItem): Promise<RawItem>;
