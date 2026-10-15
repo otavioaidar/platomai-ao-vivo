@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PlatomAI Ao Vivo</title>
+<meta name="description" content="Manchetes do mercado financeiro em tempo real, em português, a partir de fontes oficiais.">
+<meta name="theme-color" content="#0D0F1A">
+<meta name="color-scheme" content="dark">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%230D0F1A'/><path d='M23 50V14h12a11 11 0 0 1 0 22H23' fill='none' stroke='%238B5CF6' stroke-width='8' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,500..800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="styles.css">
+<script type="module" src="app.js"></script>
+</head>
+<body>
+<a class="skip" href="#feed-title">Ir para as manchetes</a>
+
+<header class="hdr">
+  <div class="hdr-inner">
+    <a class="brand" href="/">Platom<span class="brand-ai">AI</span> <span class="brand-live">Ao Vivo</span></a>
+    <div class="hdr-right">
+      <p class="conn" id="conn" data-state="connecting" role="status">
+        <span class="conn-dot" aria-hidden="true"></span><span id="conn-text">Conectando…</span>
+      </p>
+      <p class="clock"><span class="sr-only">Horário de Brasília: </span><time id="clock">--:--:--</time><span class="clock-tz" aria-hidden="true">Brasília</span></p>
+    </div>
+  </div>
+</header>
+
+<div class="page">
+  <aside class="side" id="side" data-open="false" aria-label="Agenda e fontes">
+    <button type="button" class="side-toggle" id="side-toggle" aria-expanded="false" aria-controls="side-body">
+      <span class="st-text">
+        <span class="st-title">Agenda e fontes</span>
+        <span class="st-next" id="side-next">Carregando agenda…</span>
+      </span>
+      <svg class="st-chevron" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+    </button>
+    <div class="side-body" id="side-body">
+      <section class="card" aria-labelledby="agenda-title">
+        <div class="card-head">
+          <h2 id="agenda-title">Agenda</h2>
+          <span class="card-sub">horário de Brasília</span>
+        </div>
+        <div class="agenda" id="agenda"><p class="side-msg">Carregando agenda…</p></div>
+      </section>
+      <section class="card" aria-labelledby="fontes-title">
+        <div class="card-head">
+          <h2 id="fontes-title">Fontes</h2>
+          <span class="card-sub" id="fontes-sub"></span>
+        </div>
+        <p class="ai-line" id="ai-status">Carregando status…</p>
+        <ul class="src-list" id="fontes"></ul>
+      </section>
+    </div>
+  </aside>
+
+  <main class="tape card" id="main">
+    <div class="tape-head">
+      <div class="tape-title">
+        <h1 id="feed-title" tabindex="-1">Manchetes ao vivo</h1>
+        <p class="tape-sub">Brasil e mundo, em português, direto das fontes oficiais.</p>
+      </div>
+      <div class="toggles">
+        <button type="button" class="toggle" id="sound-btn" aria-pressed="false">
+          <svg class="ico ico-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5L6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg>
+          <svg class="ico ico-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5L6 9H3v6h3l5 4z"/><path d="M16 9l5 6M21 9l-5 6"/></svg>
+          <span id="sound-label">Som: desligado</span>
+        </button>
+        <button type="button" class="toggle" id="notify-btn" aria-pressed="false" hidden>
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 16v-5a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 21h4"/></svg>
+          <span id="notify-label">Notificações: desligadas</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="tape-tools">
+      <div class="chips" role="group" aria-label="Filtrar manchetes">
+        <button type="button" class="chip" data-filter="tudo" aria-pressed="true">Tudo</button>
+        <button type="button" class="chip" data-filter="brasil" aria-pressed="false">Brasil</button>
+        <button type="button" class="chip" data-filter="mundo" aria-pressed="false">Mundo</button>
+        <button type="button" class="chip" data-filter="urgentes" aria-pressed="false">Urgentes</button>
+      </div>
+      <div class="search-row">
+        <div class="search">
+          <label class="sr-only" for="q">Buscar nas manchetes</label>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+          <input id="q" type="search" placeholder="Buscar manchetes…" autocomplete="off" spellcheck="false" enterkeyhint="search">
+        </div>
+        <span class="count" id="count"></span>
+      </div>
+    </div>
+
+    <div class="feed-state" id="feed-state" hidden></div>
+    <div class="feed" id="feed" aria-labelledby="feed-title" aria-busy="true"></div>
+  </main>
+
+  <footer class="foot">
+    <p>Manchetes geradas por IA a partir de fontes oficiais. Não é recomendação de investimento.</p>
+  </footer>
+</div>
+
+<div class="sr-only" id="announcer" aria-live="polite" aria-atomic="true"></div>
+</body>
+</html>

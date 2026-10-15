@@ -33,7 +33,7 @@ test("reads IBGE dates in the right time zone", () => {
 
 test("agenda marks the window around a scheduled release as hot", () => {
   const a = new Agenda();
-  a.items = [{ when: "2026-11-12T12:00:00.000Z", title: "Índice Nacional de Preços ao Consumidor Amplo", product: "", source: "IBGE", done: false }];
+  a.items = [{ when: "2026-11-12T12:00:00.000Z", title: "IPCA", product: "Índice Nacional de Preços ao Consumidor Amplo", source: "IBGE", done: false }];
   const ipca = SIDRA_SPECS.find((s) => s.id === "ipca")!;
   assert.equal(a.isHot(ipca.calendarTitle, new Date("2026-11-12T11:59:00Z")), true);
   assert.equal(a.isHot(ipca.calendarTitle, new Date("2026-11-12T12:10:00Z")), true);

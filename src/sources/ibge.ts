@@ -31,6 +31,23 @@ function mdy(d: Date): string {
   return `${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}-${d.getUTCFullYear()}`;
 }
 
+/** Short names for the agenda; the full IBGE title stays in `product` for matching. */
+const SHORT_NAMES: Record<string, string> = {
+  "Índice Nacional de Preços ao Consumidor Amplo": "IPCA",
+  "Índice Nacional de Preços ao Consumidor Amplo 15": "IPCA-15",
+  "Índice Nacional de Preços ao Consumidor": "INPC",
+  "Pesquisa Nacional por Amostra de Domicílios Contínua Mensal": "Desemprego (PNAD Contínua)",
+  "Pesquisa Nacional por Amostra de Domicílios Contínua Trimestral": "PNAD Contínua trimestral",
+  "Pesquisa Industrial Mensal: Produção Física - Brasil": "Produção industrial (PIM)",
+  "Pesquisa Industrial Mensal: Produção Física - Regional": "Produção industrial regional (PIM)",
+  "Pesquisa Mensal de Comércio": "Vendas no varejo (PMC)",
+  "Pesquisa Mensal de Serviços": "Serviços (PMS)",
+  "Levantamento Sistemático da Produção Agrícola": "Safra (LSPA)",
+  "Índice de Preços ao Produtor - Indústrias Extrativas e de Transformação": "Preços ao produtor (IPP)",
+  "Sistema de Contas Nacionais Trimestrais": "PIB trimestral",
+  "Sistema Nacional de Pesquisa de Custos e Índices da Construção Civil": "Custo da construção (Sinapi)",
+};
+
 /**
  * IBGE release calendar. Release times in this API are in UTC (IPCA shows 12:00 = 09:00 in Brasília).
  * Used for the site's agenda and to poll SIDRA faster around a scheduled release.
@@ -49,7 +66,8 @@ export class Agenda {
         .filter((i) => i.tipo === "Divulgação de Indicadores")
         .map((i) => {
           const when = parseBrDate(i.data_divulgacao, 0);
-          return { when: when.toISOString(), title: i.titulo, product: i.titulo, source: "IBGE", done: when <= now };
+          const product = i.titulo.trim();
+          return { when: when.toISOString(), title: SHORT_NAMES[product] ?? product, product, source: "IBGE", done: when <= now };
         })
         .filter((i) => !Number.isNaN(Date.parse(i.when)))
         .sort((a, b) => a.when.localeCompare(b.when));
@@ -76,7 +94,7 @@ export class Agenda {
     const t = now.getTime();
     return this.items.some((i) => {
       const w = Date.parse(i.when);
-      return match(i.title) && t >= w - 90 * S && t <= w + 15 * 60 * S;
+      return match(i.product) && t >= w - 90 * S && t <= w + 15 * 60 * S;
     });
   }
 
