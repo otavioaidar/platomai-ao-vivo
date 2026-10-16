@@ -74,7 +74,7 @@ Com `ALPHAVANTAGE_API_KEY`, o sistema lê o NEWS_SENTIMENT a cada 2 min: notíci
 - **Nada se perde:** cada item novo entra numa fila no banco antes de ser escrito. Se a IA falhar ou o servidor reiniciar, ele é tentado de novo (15 s, 30 s, 1 min… até 30 min de intervalo). Depois de 6 h sem sucesso, ou se a IA recusar o item, ele fica em `revisar` com o título original da fonte.
 - **Notícia velha não dispara alerta:** item que chega com mais de 6 h (por exemplo, depois de o servidor ficar fora do ar) entra no site como histórico, sem bipe nem notificação, e não vai para as redes.
 - **Linha editorial:** `editorial/linha-editorial.md` diz o que cobrir, o que destacar e o que ignorar. A IA lê esse arquivo em toda manchete e o servidor recarrega quando ele muda. É aqui que a gente direciona a cobertura. Os fatos sempre vêm da fonte.
-- **Análise PlatomAI (ainda não ligada):** `editorial/agente-analise.md` é o prompt do agente de análise completa (Resumo, Tradução PlatomAI, Impacto e Mensagem-chave). Quando a notícia não rende texto, ele responde numa linha fixa, `NÃO VALE TEXTO | motivo`. O site ainda não usa esse prompt.
+- **Análise PlatomAI (ainda não ligada):** `editorial/agente-analise.md` é o prompt do agente de análise completa (Resumo, PlatomAI decifra, Impacto e Mensagem-chave). Quando a notícia não rende texto, ele responde numa linha fixa, `NÃO VALE TEXTO | motivo`. O site ainda não usa esse prompt.
 
 ## Endereços
 
