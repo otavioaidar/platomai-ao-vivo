@@ -379,7 +379,10 @@ export function sidraSource(spec: SidraSpec, agenda: Agenda, scale: number): Sou
       const watched = rel.period === watchedPeriod;
       const r = releaseTime(agenda, spec.calendarTitle, now);
       const stale = watched ? false : agenda.lastOkAt === null || r.stale;
-      const publishedAt = watched && r.stale && newPeriodAt !== null ? new Date(newPeriodAt).toISOString() : r.publishedAt;
+      // Without an agenda date (none matched, or the calendar never loaded) a watched period keeps the time it was
+      // first seen, so later polls of it do not drift to "now".
+      const undated = r.stale || agenda.lastOkAt === null;
+      const publishedAt = watched && undated && newPeriodAt !== null ? new Date(newPeriodAt).toISOString() : r.publishedAt;
       return [
         {
           sourceId: id,
