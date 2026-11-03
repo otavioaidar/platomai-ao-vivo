@@ -8,6 +8,7 @@ import { buildPublishers } from "./publishers/index.ts";
 import { createServer } from "./server.ts";
 import { officialFeeds } from "./sources/feeds.ts";
 import { alphaVantageSource, parseQuery } from "./sources/alphavantage.ts";
+import { partnrSource } from "./sources/partnr.ts";
 import { Agenda, SIDRA_SPECS, ibgeReleases, sidraSource } from "./sources/ibge.ts";
 import { ClaudeWriter, DraftWriter } from "./writer/ai.ts";
 import type { Writer } from "./writer/ai.ts";
@@ -31,6 +32,7 @@ const writer: Writer = config.ai.enabled
 const publishers = buildPublishers(config);
 
 const av = config.alphaVantage;
+const pn = config.partnr;
 const sources = [
   ...officialFeeds(config.pollScale),
   ibgeReleases(agenda, config.pollScale),
@@ -39,6 +41,7 @@ const sources = [
   ...(av.apiKey
     ? [alphaVantageSource({ apiKey: av.apiKey, use: av.use, minRelevance: av.minRelevance, intervalMs: av.intervalMs, queries: av.queries.map(parseQuery).filter((q) => q !== null) })]
     : []),
+  ...(pn.apiKey ? [partnrSource(pn)] : []),
 ];
 
 const pipeline = new Pipeline({
@@ -86,6 +89,7 @@ server.listen(config.port, config.host, () => {
     fontes: sources.length,
     redes: publishers.map((p) => `${p.name}:${p.live ? "ao vivo" : "simulação"}`),
     alphaVantage: av.apiKey ? `${av.use} (${av.queries.length} consultas a cada ${av.intervalMs / 1000} s)` : "sem chave",
+    partnr: pn.apiKey ? `${pn.use} (a cada ${pn.intervalMs / 1000} s)` : "sem chave",
     revisao: config.reviewToken ? "/revisao (com token)" : "desligada (defina REVIEW_TOKEN)",
   });
   pipeline.start(sources);

@@ -7,6 +7,7 @@ export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
 const EFFORTS: readonly Effort[] = ["low", "medium", "high", "xhigh", "max"];
 const URGENCIES: readonly Urgency[] = ["normal", "alta", "urgente"];
 const AV_USES = ["interno", "publico"] as const;
+const PARTNR_USES = ["interno", "publico"] as const;
 /** Monetary, macro and fiscal news, plus US-listed Brazilian companies (ADRs and Nasdaq/NYSE listings). */
 const AV_DEFAULT_QUERIES = [
   "topics:economy_monetary", "topics:economy_macro", "topics:economy_fiscal",
@@ -109,6 +110,17 @@ export function loadConfig(env: Env, warn: (msg: string) => void = (msg) => log.
       // Alpha Vantage scores are generous: on a live AAPL sample, 0.8 kept 20 of 20 Apple stories, 0.5 let in 29 unrelated ones.
       minRelevance: r.num("ALPHAVANTAGE_RELEVANCIA_MIN", 0.8, 0, 1),
       intervalMs: r.num("ALPHAVANTAGE_INTERVALO_S", 120, 30, 3600, true) * 1000,
+    },
+    partnr: {
+      apiKey: r.str("PARTNR_API_KEY", ""),
+      /**
+       * interno: a private radar (review page only). publico: items go to the writer, which requires the written
+       * contract to cover public display and social posts, plus the publisher and original link in each item.
+       */
+      use: r.oneOf("PARTNR_USO", PARTNR_USES, "interno"),
+      minRelevance: r.num("PARTNR_RELEVANCIA_MIN", 0.5, 0, 1),
+      intervalMs: r.num("PARTNR_INTERVALO_S", 15, 5, 3600, true) * 1000,
+      baseUrl: r.url("PARTNR_URL", "https://data.partnr.ai/v2"),
     },
     /** Live-stream (SSE) caps: total open streams and streams per viewer IP (0 turns the per-IP cap off). */
     sse: {

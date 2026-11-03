@@ -121,3 +121,19 @@ test("Alpha Vantage stays internal unless told otherwise, and bad queries are dr
   assert.equal(warnings.length, 2);
   assert.equal(loadConfig({ ALPHAVANTAGE_USO: "sim" }, () => {}).alphaVantage.use, "interno");
 });
+
+test("Partnr stays internal unless told otherwise, polls every 15 s by default and keeps a custom host", () => {
+  const def = loadConfig({}, () => {}).partnr;
+  assert.equal(def.apiKey, "");
+  assert.equal(def.use, "interno");
+  assert.equal(def.intervalMs, 15_000);
+  assert.equal(def.minRelevance, 0.5);
+  assert.equal(def.baseUrl, "https://data.partnr.ai/v2");
+  const warnings: string[] = [];
+  const cfg = loadConfig({ PARTNR_USO: "publico", PARTNR_INTERVALO_S: "2", PARTNR_RELEVANCIA_MIN: "0,7", PARTNR_URL: "https://api.exemplo.com/v3/" }, (m) => warnings.push(m)).partnr;
+  assert.equal(cfg.use, "publico");
+  assert.equal(cfg.intervalMs, 15_000, "below 5 s falls back to the default");
+  assert.equal(cfg.minRelevance, 0.7);
+  assert.equal(cfg.baseUrl, "https://api.exemplo.com/v3");
+  assert.equal(warnings.length, 1);
+});

@@ -35,6 +35,7 @@ Outros comandos:
 | `npm run typecheck` | Checagem de tipos |
 | `npm run probe` | Consulta cada fonte uma vez e mostra o que encontrou, sem publicar |
 | `npm run amostra` | Mostra como a IA escreveria as últimas notícias de cada fonte, sem publicar (salva em `data/`) |
+| `npm run latencia` | Latência por fonte nos últimos 7 dias (`npm run latencia -- 3` para 3 dias): da publicação na fonte à detecção, e da detecção ao site |
 
 ## Fontes no ar
 
@@ -61,6 +62,16 @@ Com `ALPHAVANTAGE_API_KEY`, o sistema lê o NEWS_SENTIMENT a cada 2 min: notíci
 - **Modo `interno` (padrão):** as notícias vão só para a página privada de revisão. Não passam pela IA, não aparecem no site e não vão para as redes.
 - **Modo `publico`:** use só com o acordo comercial que cubra exibição pública, reescrita por IA e redes. Mesmo assim, o texto original é de terceiros (Reuters, Benzinga, CNBC…): a manchete reescreve o fato, cita o veículo e linka a matéria.
 - **Filtro de relevância:** as notas de relevância da Alpha Vantage são generosas, por isso o corte padrão é 0,8.
+
+## Partnr (em teste)
+
+Com `PARTNR_API_KEY`, o sistema consulta a lista de notícias da Partnr a cada 15 s (`PARTNR_INTERVALO_S`) e busca o detalhe só das notícias novas.
+
+- **Modo `interno` (padrão):** as notícias vão só para a página privada de revisão. Não passam pela IA, não aparecem no site e não vão para as redes.
+- **Modo `publico`:** use só quando o contrato autorizar por escrito a exibição no site e nas redes. Mesmo assim, a notícia só vai para a IA se trouxer o veículo e o link da matéria original (sem eles não dá para dar o crédito) e se a relevância da Partnr passar de `PARTNR_RELEVANCIA_MIN` (padrão 0,5). As outras ficam na revisão, com o motivo.
+- **Sem sinal sobre ativos:** o campo de impacto positivo ou negativo por ativo nunca é lido. Para a IA vão só o texto (ou o resumo e os pontos-chave), os nomes dos ativos citados e o veículo.
+- **O que a API manda de verdade:** a documentação pública não traz texto integral, veículo nem link. Se a resposta trouxer campos fora da documentação, o log mostra o nome deles uma vez (`Partnr: campos fora da documentação…`), e o sistema já usa texto integral, veículo e link quando eles vêm.
+- **Na semana de teste:** rode `npm run latencia` para comparar a Partnr com as fontes oficiais. `PARTNR_URL` troca o endereço da API, caso o contrato traga outro.
 
 ## Página privada de revisão
 
@@ -97,6 +108,8 @@ src/
   config.ts          variáveis de ambiente
   pipeline.ts        consulta → novo? → escreve → checa → publica → envia
   sources/feeds.ts   RSS/Atom (BCB, Copom, Fed, BCE)
+  sources/alphavantage.ts, sources/partnr.ts  feeds de notícias pagos (uso interno por padrão)
+  latency.ts         latência por fonte (npm run latencia)
   sources/ibge.ts    agenda, releases e SIDRA (+ Focus)
   writer/ai.ts       redator Claude e modo rascunho
   writer/templates.ts modelos fixos para números oficiais

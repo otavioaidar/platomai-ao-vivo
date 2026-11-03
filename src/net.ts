@@ -69,9 +69,10 @@ export async function fetchText(url: string, timeoutMs = 10_000): Promise<string
   return res.text();
 }
 
-export async function fetchJson<T>(url: string, timeoutMs = 10_000): Promise<T> {
+/** `headers` carries credentials that must stay out of the URL (e.g. a Bearer token), so errors never leak them. */
+export async function fetchJson<T>(url: string, timeoutMs = 10_000, headers: Record<string, string> = {}): Promise<T> {
   const res = await fetch(url, {
-    headers: { "user-agent": UA, accept: "application/json" },
+    headers: { "user-agent": UA, accept: "application/json", ...headers },
     signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status} em ${new URL(url).host}`);
