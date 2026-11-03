@@ -40,7 +40,7 @@ const TYPES: Record<string, string> = {
   ".webmanifest": "application/manifest+json",
 };
 
-/** The page loads only its own files, the Google Fonts stylesheet and fonts, and a data: favicon. No inline code. */
+/** The page loads only its own files (including the logo and favicon), the Google Fonts stylesheet and fonts. No inline code. */
 const CSP = [
   "default-src 'self'",
   "script-src 'self'",

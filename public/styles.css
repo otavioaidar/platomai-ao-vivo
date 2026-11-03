@@ -1,51 +1,53 @@
-/* PlatomAI Ao Vivo — styles. Single dark theme (brand palette). No green anywhere. */
+/* PlatomAI Ao Vivo — styles. Single dark theme, matching the PlatomAI platform (navy, #9400ff purple, DM Sans and Inter). No green anywhere. */
 
 :root {
   /* Surfaces */
-  --bg: #0D0F1A;
-  --bg-glass: rgba(13, 15, 26, 0.94);
-  --surface: #141728;
-  --surface-2: #1A1E33;
-  --surface-3: #232741;
-  --row-hover: #171A2E;
-  --border: #272B42;
-  --border-soft: #1F2338;
-  --border-strong: #343954;
-  /* Borders of inputs, chips and toggles: at least 3:1 against --surface and --bg. */
-  --control-border: #666B90;
-  --control-border-hover: #8C91B6;
+  --bg: #081028;
+  --bg-glass: rgba(8, 16, 40, 0.94);
+  --surface: #0B1739;
+  --surface-2: #10204A;
+  --surface-3: #16295A;
+  --row-hover: #0E1C44;
+  --border: #343B4F;
+  --border-soft: #1F2937;
+  --border-strong: #4A5270;
+  /* Outlined pills, as on the platform: light borders, well above 3:1 against --surface and --bg. */
+  --control-border: #D6DCF2;
+  --control-border-hover: #FFFFFF;
 
   /* Brand */
-  --purple: #8B5CF6;
-  --purple-btn: #7C3AED;
-  --purple-text: #B49CFB;
-  --purple-border: #3B3463;
-  --purple-wash: rgba(139, 92, 246, 0.14);
-  --purple-tint: rgba(139, 92, 246, 0.08);
-  --purple-text-hover: #D3C6FD;
-  --purple-btn-hover: #6D28D9;
-  --highlight: rgba(139, 92, 246, 0.24);
-  --pulse: rgba(139, 92, 246, 0.65);
+  --purple: #9400FF;
+  --purple-btn: #9400FF;
+  /* #9400FF is too dark for small text on navy: text and icons use this lighter tint. */
+  --purple-text: #C08BFF;
+  --purple-border: #4B2A8A;
+  --purple-wash: rgba(148, 0, 255, 0.16);
+  --purple-tint: rgba(148, 0, 255, 0.08);
+  --purple-text-hover: #D8B8FF;
+  --purple-btn-hover: #7A00D6;
+  --highlight: rgba(148, 0, 255, 0.24);
+  --pulse: rgba(148, 0, 255, 0.65);
   --blue: #2E75B6;
-  --blue-text: #7FB3E6;
+  --blue-text: #79C3F2;
   --blue-wash: rgba(46, 117, 182, 0.18);
   --blue-border: #24476B;
 
   /* Text */
-  --text: #ECEBF5;
-  --text-2: #C9CADB;
-  --muted: #A4A6BD;
+  --text: #FEFEFE;
+  --text-2: #D6DCF2;
+  --muted: #AEB9E1;
 
   /* Urgent / negative */
   --red: #F07A72;
   --red-border: #6B2E2A;
   --red-wash: rgba(240, 122, 114, 0.06);
 
-  --focus: #B49CFB;
+  --focus: #C08BFF;
 
-  --font-sans: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  --font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
-  --font-disp: 'Archivo', 'IBM Plex Sans', system-ui, sans-serif;
+  --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  /* Times and counts keep their columns with Inter's tabular figures (set on body) instead of a mono font. */
+  --font-mono: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-disp: 'DM Sans', 'Inter', system-ui, sans-serif;
 
   --gutter: 32px;
   --row-x: 20px;
@@ -73,6 +75,7 @@ body {
   font-family: var(--font-sans);
   font-size: 15px;
   line-height: 1.5;
+  font-variant-numeric: tabular-nums;
 }
 
 a { color: var(--purple-text); }
@@ -131,18 +134,23 @@ button, input { font: inherit; color: inherit; }
 }
 
 .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
   font-family: var(--font-disp);
-  font-weight: 800;
-  font-size: 25px;
-  font-stretch: 85%;
   line-height: 1;
   color: var(--text);
   text-decoration: none;
   white-space: nowrap;
 }
 .brand:hover { color: var(--text); }
-.brand-ai { color: var(--purple-text); }
-.brand-live { font-weight: 600; font-stretch: 90%; }
+.brand-logo { display: block; height: 30px; width: auto; }
+.brand-live {
+  padding-left: 12px;
+  border-left: 1px solid var(--border);
+  font-size: 20px;
+  font-weight: 700;
+}
 
 .hdr-right {
   margin-left: auto;
@@ -217,7 +225,7 @@ button, input { font: inherit; color: inherit; }
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 16px;
 }
 
 /* ------------------------------------------------------------------ */
@@ -242,10 +250,10 @@ button, input { font: inherit; color: inherit; }
 .tape-head h1 {
   margin: 0;
   font-family: var(--font-disp);
-  font-size: 32px;
-  font-weight: 800;
-  font-stretch: 80%;
-  line-height: 1.05;
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
 }
 .tape-head h1:focus { outline: none; }
 .tape-sub { margin: 6px 0 0; font-size: 14px; color: var(--muted); }
@@ -256,14 +264,15 @@ button, input { font: inherit; color: inherit; }
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  min-height: 36px;
-  padding: 0 12px;
-  border: 1px solid var(--control-border);
-  border-radius: 8px;
+  min-height: 38px;
+  padding: 0 16px;
+  border: 1.5px solid var(--control-border);
+  border-radius: 999px;
   background: transparent;
-  color: var(--text-2);
-  font-size: 13px;
-  font-weight: 500;
+  color: var(--text);
+  font-family: var(--font-disp);
+  font-size: 14px;
+  font-weight: 600;
   white-space: nowrap;
   cursor: pointer;
 }
@@ -293,14 +302,15 @@ button, input { font: inherit; color: inherit; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 
 .chip {
-  min-height: 34px;
-  padding: 0 14px;
-  border: 1px solid var(--control-border);
+  min-height: 40px;
+  padding: 0 22px;
+  border: 1.5px solid var(--control-border);
   border-radius: 999px;
   background: transparent;
-  color: var(--text-2);
-  font-size: 13px;
-  font-weight: 500;
+  color: var(--text);
+  font-family: var(--font-disp);
+  font-size: 15px;
+  font-weight: 600;
   white-space: nowrap;
   cursor: pointer;
 }
@@ -326,7 +336,7 @@ button, input { font: inherit; color: inherit; }
 }
 .search svg {
   position: absolute;
-  left: 11px; top: 50%;
+  left: 14px; top: 50%;
   width: 16px; height: 16px;
   transform: translateY(-50%);
   color: var(--muted);
@@ -334,15 +344,15 @@ button, input { font: inherit; color: inherit; }
 }
 .search input {
   width: 100%;
-  height: 36px;
-  padding: 0 10px 0 34px;
-  border: 1px solid var(--control-border);
-  border-radius: 8px;
+  height: 40px;
+  padding: 0 14px 0 38px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
   background: var(--bg);
   font-size: 14px;
 }
 .search input::placeholder { color: var(--muted); opacity: 1; }
-.search input:hover { border-color: var(--control-border-hover); }
+.search input:hover { border-color: var(--border-strong); }
 .search input:focus-visible { outline-offset: 0; border-color: var(--purple); }
 
 .count {
@@ -368,7 +378,6 @@ button, input { font: inherit; color: inherit; }
   font-family: var(--font-disp);
   font-size: 20px;
   font-weight: 700;
-  font-stretch: 90%;
   color: var(--text);
 }
 .feed-state p { margin: 0 auto; max-width: 46ch; }
@@ -575,7 +584,6 @@ button, input { font: inherit; color: inherit; }
   font-family: var(--font-disp);
   font-size: 19px;
   font-weight: 700;
-  font-stretch: 90%;
 }
 .card-sub { font-size: 12px; color: var(--muted); text-align: right; }
 .card-sub.is-bad { color: var(--red); }
@@ -720,7 +728,7 @@ button, input { font: inherit; color: inherit; }
   }
   .side-toggle:hover { border-color: var(--border-strong); }
   .st-text { flex: 1; min-width: 0; display: grid; }
-  .st-title { font-family: var(--font-disp); font-size: 16px; font-weight: 700; font-stretch: 90%; }
+  .st-title { font-family: var(--font-disp); font-size: 16px; font-weight: 700; }
   .st-next {
     font-size: 12.5px;
     color: var(--muted);
@@ -744,7 +752,9 @@ button, input { font: inherit; color: inherit; }
   html { scroll-padding-top: 72px; }
 
   .hdr-inner { min-height: 56px; padding-top: 8px; padding-bottom: 8px; gap: 10px; }
-  .brand { font-size: 21px; }
+  .brand { gap: 10px; }
+  .brand-logo { height: 24px; }
+  .brand-live { padding-left: 10px; font-size: 16px; }
   .hdr-right { flex-direction: column; align-items: flex-end; gap: 3px; }
   .conn { height: 22px; padding: 0 9px; gap: 6px; font-size: 10.5px; }
   .clock time { font-size: 13px; }
@@ -779,7 +789,8 @@ button, input { font: inherit; color: inherit; }
 }
 
 @media (max-width: 380px) {
-  .brand { font-size: 19px; }
+  .brand-logo { height: 22px; }
+  .brand-live { font-size: 15px; }
   .toggle .ico { display: none; }
 }
 
