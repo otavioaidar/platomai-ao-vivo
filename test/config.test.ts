@@ -137,3 +137,12 @@ test("Partnr stays internal unless told otherwise, polls every 15 s by default a
   assert.equal(cfg.baseUrl, "https://api.exemplo.com/v3");
   assert.equal(warnings.length, 1);
 });
+
+test("an API key with spaces or control characters is refused without echoing it", () => {
+  const warnings: string[] = [];
+  const cfg = loadConfig({ PARTNR_API_KEY: "abc\ndef" }, (m) => warnings.push(m)).partnr;
+  assert.equal(cfg.apiKey, "");
+  assert.equal(warnings.length, 1);
+  assert.doesNotMatch(warnings[0], /abc|def/);
+  assert.equal(loadConfig({ PARTNR_API_KEY: "pk_live-123.ABC" }, () => {}).partnr.apiKey, "pk_live-123.ABC");
+});

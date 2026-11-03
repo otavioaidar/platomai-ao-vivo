@@ -71,6 +71,8 @@ export async function fetchText(url: string, timeoutMs = 10_000): Promise<string
 
 /** `headers` carries credentials that must stay out of the URL (e.g. a Bearer token), so errors never leak them. */
 export async function fetchJson<T>(url: string, timeoutMs = 10_000, headers: Record<string, string> = {}): Promise<T> {
+  // fetch would reject such a value with an error that quotes it: fail with a message that does not.
+  if (Object.values(headers).some((v) => /[\r\n\0]/.test(v))) throw new Error(`cabeçalho de credencial inválido para ${new URL(url).host}`);
   const res = await fetch(url, {
     headers: { "user-agent": UA, accept: "application/json", ...headers },
     signal: AbortSignal.timeout(timeoutMs),

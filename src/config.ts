@@ -71,6 +71,15 @@ function reader(env: Env, warn: (msg: string) => void) {
       return [...def];
     },
 
+    /** A token that goes in an HTTP header: printable ASCII only. A bad one warns without echoing it and stays off. */
+    secret(name: string): string {
+      const v = raw(name);
+      if (v === undefined) return "";
+      if (/^[\x21-\x7e]+$/.test(v)) return v;
+      warn(`config: ${name} inválida (espaço ou caractere de controle); a fonte fica desligada`);
+      return "";
+    },
+
     /** An http(s) address without the trailing slash. */
     url(name: string, def: string): string {
       const v = raw(name);
@@ -112,7 +121,7 @@ export function loadConfig(env: Env, warn: (msg: string) => void = (msg) => log.
       intervalMs: r.num("ALPHAVANTAGE_INTERVALO_S", 120, 30, 3600, true) * 1000,
     },
     partnr: {
-      apiKey: r.str("PARTNR_API_KEY", ""),
+      apiKey: r.secret("PARTNR_API_KEY"),
       /**
        * interno: a private radar (review page only). publico: items go to the writer, which requires the written
        * contract to cover public display and social posts, plus the publisher and original link in each item.

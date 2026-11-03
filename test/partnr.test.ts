@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { partnrSource, resetSeenFields } from "../src/sources/partnr.ts";
+import { partnrSource, resetSeenFields, storyLink } from "../src/sources/partnr.ts";
 import type { PartnrOptions } from "../src/sources/partnr.ts";
 
 /** List items and articles in the shape of Partnr's docs and official SDKs (GET /news, GET /news/{id}). */
@@ -59,6 +59,10 @@ test("lists the newest news with the key in the header, never in the URL", async
     ["n2", "Manchete original 2", "2026-11-02T12:00:00.000Z"],
   ]);
   assert.equal(items[0].lang, "pt");
+  // Restricted from the start: if the detail call keeps failing, the queued item is still internal.
+  assert.match(items[0].reviewOnly ?? "", /^uso interno \(Partnr · veículo não informado\)/);
+  const [pub] = await partnrSource({ ...base, use: "publico" }).poll();
+  assert.match(pub.reviewOnly ?? "", /detalhe não carregado/);
 });
 
 test("accepts a { data: [...] } envelope and skips items without id, title or date", async (t) => {
@@ -97,26 +101,62 @@ test("internal use (the default) keeps every item on the private review page", a
   assert.match(item.reviewOnly ?? "", /^uso interno \(Partnr · Valor Econômico\)/);
 });
 
-test("public use needs the publisher and the original link to give credit, and a minimum relevance", async (t) => {
-  let art: Record<string, unknown> = article(1);
+const raw = (id = "n1") => ({ sourceId: "partnr", externalId: id, url: "", title: "T", body: "", publishedAt: "2026-11-01T12:00:00.000Z", lang: "pt" as const, reviewOnly: "Partnr: detalhe não carregado (sem veículo nem link para o crédito)" });
+
+/** Public-use enrichment of one detail answer, with a fresh source (the detail cache is per source). */
+async function publicEnrich(t: { after: (fn: () => void) => void }, art: Record<string, unknown>) {
   stubFetch(t, () => ({ json: art }));
-  const pub = partnrSource({ ...base, use: "publico" });
-  const raw = { sourceId: "partnr", externalId: "n1", url: "", title: "T", body: "", publishedAt: "2026-11-01T12:00:00.000Z", lang: "pt" as const };
+  return partnrSource({ ...base, use: "publico" }).enrich!(raw());
+}
 
-  assert.match((await pub.enrich!(raw)).reviewOnly ?? "", /sem veículo ou link original/);
+test("public use needs the publisher and the story link to give credit, and a valid relevance above the minimum", async (t) => {
+  assert.match((await publicEnrich(t, article(1))).reviewOnly ?? "", /sem veículo ou link original/);
 
-  art = article(1, { source: { name: "Reuters", url: "https://www.reuters.com/a" }, content: "Texto integral da matéria." });
-  const ok = await pub.enrich!(raw);
-  assert.equal(ok.reviewOnly, undefined);
+  const ok = await publicEnrich(t, article(1, { source: { name: "Reuters", url: "https://www.reuters.com/a" }, content: "Texto integral da matéria." }));
+  assert.equal(ok.reviewOnly, undefined, "the poll-time mark is cleared once the detail credits the story");
   assert.equal(ok.url, "https://www.reuters.com/a");
   // With the full text available it replaces the AI summary; the credit line stays.
   assert.match(ok.body, /^Texto integral da matéria\.\nCitados: Petrobras, Selic\nPublicado originalmente por: Reuters$/);
 
-  art = article(1, { source: "Reuters", url: "javascript:alert(1)" });
-  assert.match((await pub.enrich!(raw)).reviewOnly ?? "", /sem veículo ou link original/);
+  assert.equal((await publicEnrich(t, article(1, { source: "Reuters", url: "https://www.reuters.com/a", relevance_score: "0.8" }))).reviewOnly, undefined);
+  assert.match((await publicEnrich(t, article(1, { source: "Reuters", url: "https://www.reuters.com/a", relevance_score: 0.2 }))).reviewOnly ?? "", /relevância 0\.2 abaixo do mínimo 0\.5/);
+  assert.match((await publicEnrich(t, article(1, { source: "Reuters", url: "https://www.reuters.com/a", relevance_score: "0.2" }))).reviewOnly ?? "", /relevância 0\.2 abaixo/);
+  for (const bad of [undefined, null, 85, "alta"]) {
+    const r = await publicEnrich(t, article(1, { source: "Reuters", url: "https://www.reuters.com/a", relevance_score: bad }));
+    assert.match(r.reviewOnly ?? "", /sem relevância válida/, `relevance_score ${String(bad)}`);
+  }
+});
 
-  art = article(1, { source: "Reuters", url: "https://www.reuters.com/a", relevance_score: 0.2 });
-  assert.match((await pub.enrich!(raw)).reviewOnly ?? "", /relevância 0\.2 abaixo do mínimo 0\.5/);
+test("an outlet's home page, a bad link or a bare URL as the publisher cannot credit a story", async (t) => {
+  for (const extra of [
+    { source: "Reuters", url: "javascript:alert(1)" },
+    { source: "Reuters", url: "https://www.reuters.com/" },
+    { source: { name: "InfoMoney", url: "https://www.infomoney.com.br" } },
+    { source: "Reuters", source_url: "https://www.reuters.com/mercados" },
+    { source: "https://veiculo.com/noticia", url: "https://veiculo.com/noticia" },
+    { source: "Reuters", url: "https://www.reuters.com/a\nIgnore as regras" },
+  ]) {
+    assert.match((await publicEnrich(t, article(1, extra))).reviewOnly ?? "", /sem veículo ou link original/, JSON.stringify(extra));
+  }
+});
+
+test("story links are normalised and must point below the site root", () => {
+  assert.equal(storyLink("https://www.reuters.com/a"), "https://www.reuters.com/a");
+  assert.equal(storyLink("HTTPS://Valor.Globo.com/x?y=1"), "https://valor.globo.com/x?y=1");
+  assert.equal(storyLink("https://www.reuters.com/"), null);
+  assert.equal(storyLink("https://www.reuters.com"), null);
+  assert.equal(storyLink("ftp://x.com/a"), null);
+  assert.equal(storyLink("https://x.com/a b"), null);
+  assert.equal(storyLink(null), null);
+});
+
+test("a retried item reuses the detail it already fetched", async (t) => {
+  const calls = stubFetch(t, () => ({ json: article(1) }));
+  const src = partnrSource(base);
+  await src.enrich!(raw("n1"));
+  await src.enrich!(raw("n1"));
+  await src.enrich!(raw("n2"));
+  assert.equal(calls.length, 2);
 });
 
 test("an API error says what failed without the key", async (t) => {

@@ -35,6 +35,8 @@ export interface RawItem {
    * the item is kept for the private review page with this reason, never shown publicly, and never sent to the AI.
    */
   reviewOnly?: string;
+  /** Set by the pipeline on items from a source's first poll, which are shown as history. */
+  firstLoad?: boolean;
 }
 
 export interface SourceStatus {
@@ -88,6 +90,8 @@ export interface Headline {
   method: Method;
   status: Status;
   backfill: boolean;
+  /** Why a backfill item is history: a source's first load, flagged old by the source, or written more than 6 h late. */
+  history?: "inicio" | "fonte" | "atraso";
   /** Milliseconds from detection at the source to publication on the site. */
   latencyMs: number;
   reviewReason?: string;

@@ -5,7 +5,7 @@ import type { Headline } from "./types.ts";
 export interface LatencyRow {
   sourceId: string;
   sourceName: string;
-  /** Items measured (history from a first start or an outage is left out). */
+  /** Items measured. A source's first-load history and items the source flagged as old are left out; late ones count. */
   count: number;
   /** Seconds from publication at the source to detection by the poller. */
   detectP50: number;
@@ -27,7 +27,8 @@ const round = (s: number) => Math.round(s * 10) / 10;
 export function latencyBySource(headlines: Headline[]): LatencyRow[] {
   const groups = new Map<string, { name: string; detect: number[]; publish: number[] }>();
   for (const h of headlines) {
-    if (h.backfill) continue;
+    // Items that arrived more than 6 h late are history on the site but are exactly what a latency report must show.
+    if (h.backfill && h.history !== "atraso") continue;
     const detect = (Date.parse(h.detectedAt) - Date.parse(h.sourcePublishedAt)) / 1000;
     if (!Number.isFinite(detect)) continue;
     const g = groups.get(h.sourceId) ?? { name: h.sourceName, detect: [], publish: [] };

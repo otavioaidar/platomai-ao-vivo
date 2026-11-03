@@ -526,3 +526,67 @@ test("an item from an internal-use source goes only to the review queue: no AI, 
   assert.equal(store.reviewQueue(10)[0].id, h.id);
   hub.close();
 });
+
+test("an internal-use item whose enrichment keeps failing stays internal when it gives up, even with SHOW_REVIEW", async () => {
+  const store = new Store(":memory:");
+  const hub = new Hub(60_000);
+  const sent: string[] = [];
+  hub.send = (event) => void sent.push(event);
+  const writer = new FakeWriter();
+  const clock = { t: Date.now() };
+  const p = new Pipeline({ store, writer, hub, publishers: [new FakePublisher()], minUrgency: "normal", backfillPerSource: 0, showReview: true, aiConcurrency: 1, now: () => clock.t });
+  const internal = { ...item("1", "Manchete de terceiros", 0), reviewOnly: "uso interno (Partnr · veículo não informado): contrato pendente" };
+  const src: Source = {
+    ...fakeSource([[item("0", "Antigo", 60)], [item("0", "Antigo", 60), internal]]),
+    enrich: async () => {
+      throw new Error("HTTP 404 em data.partnr.ai");
+    },
+  };
+  await p.runOnce(src);
+  await p.runOnce(src);
+  clock.t += 7 * HOUR;
+  const [h] = await p.runDue(src);
+  assert.equal(h.status, "revisar");
+  assert.equal(h.internalOnly, true);
+  assert.match(h.reviewReason ?? "", /^falha ao escrever após 2 tentativas: HTTP 404/);
+  assert.equal(writer.calls, 0);
+  assert.deepEqual(sent, [], "not broadcast to the public page");
+  assert.equal(store.latest(10, true).some((x) => x.id === h.id), false);
+  hub.close();
+});
+
+test("history says why: a source's first load is 'inicio', an item written more than 6 h late is 'atraso'", async () => {
+  const fresh = item("1", "Nota nova", 0);
+  const { p, src, writer, clock, hub } = setup([[item("0", "Antigo", 60)], [item("0", "Antigo", 60), fresh]]);
+  const [first] = await p.runOnce(src);
+  assert.equal(first.backfill, true);
+  assert.equal(first.history, "inicio");
+  writer.failures = 1;
+  await p.runOnce(src);
+  clock.t += 7 * HOUR;
+  const [late] = await p.runDue(src);
+  assert.equal(late.history, "atraso");
+  hub.close();
+});
+
+test("runDue writes queued retries without polling the source", async () => {
+  let polls = 0;
+  const { p, writer, clock, hub } = setup([]);
+  const src: Source = {
+    ...fakeSource([[item("0", "Antigo", 60)], [item("0", "Antigo", 60), item("1", "Nota nova", 0)]]),
+  };
+  const poll = src.poll;
+  src.poll = async () => {
+    polls++;
+    return poll();
+  };
+  await p.runOnce(src);
+  writer.failures = 1;
+  await p.runOnce(src);
+  assert.equal(polls, 2);
+  clock.t += 20_000;
+  const [h] = await p.runDue(src);
+  assert.equal(h.headline, "Nota nova");
+  assert.equal(polls, 2, "the retry did not poll again");
+  hub.close();
+});

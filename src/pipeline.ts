@@ -136,6 +136,11 @@ export class Pipeline {
 
   /** Polls one source once, then writes every queued item that is due (new ones and retries). Returns what was written. */
   async runOnce(src: Source): Promise<Headline[]> {
+    await this.poll(src);
+    return this.runDue(src);
+  }
+
+  private async poll(src: Source): Promise<void> {
     const st = this.status.get(src.id) ?? { id: src.id, name: src.name, lastOkAt: null, lastError: null };
     this.status.set(src.id, st);
     const detectedAt = this.now();
@@ -149,7 +154,10 @@ export class Pipeline {
       log.warn(`fonte ${src.id} falhou`, err);
     }
     if (items) this.admit(src, items, detectedAt);
+  }
 
+  /** Writes every queued item of a source that is due (new ones and retries), without polling it. */
+  async runDue(src: Source): Promise<Headline[]> {
     const due = this.o.store.duePending(src.id, this.now()).filter((j) => !this.busy.has(j.key));
     const out: Headline[] = [];
     await Promise.all(
@@ -179,7 +187,8 @@ export class Pipeline {
     }
     const jobs = todo.map((item) => ({
       key: rawKey(item),
-      item,
+      // Marked so the latency report can leave a source's first-load history out but keep items that arrived late.
+      item: bootstrap ? { ...item, firstLoad: true } : item,
       // Stale items (first run, flagged by the source, or too old) are site history only: no social posts.
       backfill: bootstrap || item.stale === true || detectedAt - Date.parse(item.publishedAt) > STALE_MS,
     }));
@@ -212,7 +221,9 @@ export class Pipeline {
       this.o.store.retryPending(job.key, attempts, now + retryDelayMs(attempts), errorText(err));
       return null;
     }
-    return this.commit(job, this.review(src, job.item, job, `falha ao escrever após ${attempts} tentativas: ${errorText(err)}`));
+    const h = this.review(src, job.item, job, `falha ao escrever após ${attempts} tentativas: ${errorText(err)}`);
+    // A source's restriction (e.g. internal use only) holds on the give-up path too, even if enrich never ran.
+    return this.commit(job, job.item.reviewOnly ? { ...h, internalOnly: true } : h);
   }
 
   private async process(src: Source, job: PendingJob): Promise<Headline | null> {
@@ -263,6 +274,7 @@ export class Pipeline {
     const reviewReason = reasons.length ? reasons.join("; ") : undefined;
     const now = this.now();
     const backfill = job.backfill || now - Date.parse(item.publishedAt) > STALE_MS;
+    const history = !backfill ? undefined : item.firstLoad ? "inicio" : item.stale ? "fonte" : "atraso";
     return {
       id: headlineId(item),
       publishedAt: backfill ? item.publishedAt : new Date(now).toISOString(),
@@ -280,6 +292,7 @@ export class Pipeline {
       method: draft.method,
       status,
       backfill,
+      ...(history ? { history } : {}),
       latencyMs: now - job.firstDetectedAt,
       ...(draft.method === "rascunho" && item.lang === "en" ? { lang: "en" as const } : {}),
       ...(reviewReason ? { reviewReason } : {}),
@@ -345,11 +358,19 @@ export class Pipeline {
   private async loop(src: Source): Promise<void> {
     const signal = this.abort.signal;
     await sleep(Math.random() * 2000, undefined, { signal }).catch(() => {});
+    let nextPollAt = 0;
     while (!signal.aborted) {
       let delay = src.intervalMs;
       try {
-        await this.runOnce(src);
-        delay = nextDelayMs(src, new Date(this.now()));
+        // The schedule runs on the real clock, like the sleeps below; this.now() stays the clock of the items.
+        if (Date.now() >= nextPollAt) {
+          await this.runOnce(src);
+          nextPollAt = Date.now() + nextDelayMs(src, new Date(this.now()));
+        } else {
+          // Woken early for a queued retry: write it without polling the source again (paid APIs count every call).
+          await this.runDue(src);
+        }
+        delay = Math.max(0, nextPollAt - Date.now());
         // Wake up for a queued retry even when the source itself is polled rarely (e.g. Copom outside its window).
         const retryAt = this.o.store.nextPendingAt(src.id);
         if (retryAt !== null) delay = Math.min(delay, Math.max(1000, retryAt - this.now()));

@@ -14,7 +14,7 @@
     "typecheck": "tsc --noEmit",
     "probe": "node --disable-warning=ExperimentalWarning scripts/probe.ts",
     "amostra": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning scripts/amostra.ts",
-    "latencia": "node --disable-warning=ExperimentalWarning scripts/latencia.ts"
+    "latencia": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning scripts/latencia.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.134.0",

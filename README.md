@@ -68,10 +68,10 @@ Com `ALPHAVANTAGE_API_KEY`, o sistema lê o NEWS_SENTIMENT a cada 2 min: notíci
 Com `PARTNR_API_KEY`, o sistema consulta a lista de notícias da Partnr a cada 15 s (`PARTNR_INTERVALO_S`) e busca o detalhe só das notícias novas.
 
 - **Modo `interno` (padrão):** as notícias vão só para a página privada de revisão. Não passam pela IA, não aparecem no site e não vão para as redes.
-- **Modo `publico`:** use só quando o contrato autorizar por escrito a exibição no site e nas redes. Mesmo assim, a notícia só vai para a IA se trouxer o veículo e o link da matéria original (sem eles não dá para dar o crédito) e se a relevância da Partnr passar de `PARTNR_RELEVANCIA_MIN` (padrão 0,5). As outras ficam na revisão, com o motivo.
+- **Modo `publico`:** use só quando o contrato autorizar por escrito a exibição no site e nas redes. Mesmo assim, a notícia só vai para a IA se trouxer o veículo e o link da matéria original (a página inicial do veículo não serve) e se a relevância da Partnr for válida e passar de `PARTNR_RELEVANCIA_MIN` (padrão 0,5). As outras ficam na revisão, com o motivo. Enquanto o detalhe não carrega, a notícia nunca vai a público.
 - **Sem sinal sobre ativos:** o campo de impacto positivo ou negativo por ativo nunca é lido. Para a IA vão só o texto (ou o resumo e os pontos-chave), os nomes dos ativos citados e o veículo.
 - **O que a API manda de verdade:** a documentação pública não traz texto integral, veículo nem link. Se a resposta trouxer campos fora da documentação, o log mostra o nome deles uma vez (`Partnr: campos fora da documentação…`), e o sistema já usa texto integral, veículo e link quando eles vêm.
-- **Na semana de teste:** rode `npm run latencia` para comparar a Partnr com as fontes oficiais. `PARTNR_URL` troca o endereço da API, caso o contrato traga outro.
+- **Na semana de teste:** rode `npm run latencia` para comparar a Partnr com as fontes oficiais (no Docker: `docker exec aovivo node --disable-warning=ExperimentalWarning scripts/latencia.ts`). Notícias que chegaram com mais de 6 h de atraso entram na conta; o histórico da primeira carga, não. `PARTNR_URL` troca o endereço da API, caso o contrato traga outro.
 
 ## Página privada de revisão
 

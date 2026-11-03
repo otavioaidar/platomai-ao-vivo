@@ -7,6 +7,8 @@ COPY certs ./certs
 COPY editorial ./editorial
 COPY public ./public
 COPY src ./src
+# The latency report reads the same database: docker exec aovivo node --disable-warning=ExperimentalWarning scripts/latencia.ts
+COPY scripts/latencia.ts ./scripts/latencia.ts
 # The database lives on the /data volume, owned by the unprivileged node user; the code stays read-only for it.
 RUN mkdir -p /data && chown node:node /data
 ENV NODE_ENV=production PORT=8080 DB_PATH=/data/aovivo.db

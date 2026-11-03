@@ -42,3 +42,12 @@ test("truncates on a word boundary", () => {
   assert.equal(truncate("abc def ghi", 8), "abc def…");
   assert.equal(truncate("curto", 10), "curto");
 });
+
+test("fetchJson refuses a header value with a line break without quoting it", async () => {
+  const { fetchJson } = await import("../src/net.ts");
+  await assert.rejects(fetchJson("https://data.partnr.ai/v2/news", 1000, { authorization: "Bearer abc\ndef" }), (err: Error) => {
+    assert.match(err.message, /cabeçalho de credencial inválido para data\.partnr\.ai/);
+    assert.doesNotMatch(err.message, /abc|def/);
+    return true;
+  });
+});

@@ -2,5 +2,6 @@ node_modules
 data
 .env
 test
-scripts
+scripts/*
+!scripts/latencia.ts
 .git

@@ -81,6 +81,13 @@ function hhmm(iso: string): string {
   return new Date(iso).toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" });
 }
 
+/** The link sits outside the <fonte> block, so only a clean http(s) URL goes in; anything else is dropped. */
+export function safeLink(url: string): string {
+  if (!url || /[\u0000-\u001F\u007F\s]/.test(url)) return "(sem link)";
+  const u = URL.parse(url);
+  return u && (u.protocol === "https:" || u.protocol === "http:") ? u.href : "(sem link)";
+}
+
 /** Source text as data: a literal <fonte> or </fonte> inside it cannot close or reopen the data block. */
 export function fenced(text: string): string {
   return text.replace(/<\s*(\/?)\s*fonte\s*>/gi, "[$1fonte]");
@@ -178,7 +185,7 @@ export class ClaudeWriter implements Writer {
     const user = [
       `Fonte: ${ctx.source.name} (${ctx.source.region === "BR" ? "Brasil" : "internacional"})`,
       `Publicado na fonte: ${item.publishedAt}`,
-      `Link: ${item.url}`,
+      `Link: ${safeLink(item.url)}`,
       `Idioma: ${item.lang}`,
       "",
       "Manchetes recentes desta fonte:",

@@ -21,17 +21,20 @@ test("nearest-rank percentiles", () => {
   assert.equal(percentile([7], 95), 7);
 });
 
-test("latency per source leaves history out and counts a source clock ahead of ours as immediate", () => {
+test("latency per source leaves first-load and source-flagged history out, keeps late items, and counts a source clock ahead of ours as immediate", () => {
   const rows = latencyBySource([
     h("partnr", 40),
     h("partnr", 10),
     h("partnr", 25),
     h("partnr", 600, { backfill: true }),
+    h("partnr", 600, { backfill: true, history: "inicio" }),
+    h("partnr", 9 * 3600, { backfill: true, history: "atraso" }),
+    h("partnr", 5, { backfill: true, history: "fonte" }),
     h("copom", -3),
     h("copom", 4, { sourcePublishedAt: "data ruim" }),
   ]);
   assert.deepEqual(rows, [
     { sourceId: "copom", sourceName: "COPOM", count: 1, detectP50: 0, detectP95: 0, detectMax: 0, publishP50: 2 },
-    { sourceId: "partnr", sourceName: "PARTNR", count: 3, detectP50: 25, detectP95: 40, detectMax: 40, publishP50: 2 },
+    { sourceId: "partnr", sourceName: "PARTNR", count: 4, detectP50: 25, detectP95: 32400, detectMax: 32400, publishP50: 2 },
   ]);
 });
