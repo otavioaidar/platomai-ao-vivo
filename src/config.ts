@@ -120,6 +120,11 @@ export function loadConfig(env: Env, warn: (msg: string) => void = (msg) => log.
       minRelevance: r.num("ALPHAVANTAGE_RELEVANCIA_MIN", 0.8, 0, 1),
       intervalMs: r.num("ALPHAVANTAGE_INTERVALO_S", 120, 30, 3600, true) * 1000,
     },
+    cvm: {
+      /** Fatos relevantes from the CVM's own search: an official, free source, on by default. */
+      enabled: r.bool("CVM_FATOS", true),
+      intervalMs: r.num("CVM_INTERVALO_S", 30, 10, 3600, true) * 1000,
+    },
     partnr: {
       apiKey: r.secret("PARTNR_API_KEY"),
       /**

@@ -1,5 +1,7 @@
 # Needs Node 24.5+ (tls.setDefaultCACertificates). Build with --pull so a stale local node:24 image is not reused.
 FROM node:24-slim
+# pdftotext reads the text of CVM filings (fatos relevantes); without it they go out with the subject only.
+RUN apt-get update && apt-get install -y --no-install-recommends poppler-utils && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force

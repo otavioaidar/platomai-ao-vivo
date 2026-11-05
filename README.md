@@ -51,6 +51,7 @@ Horários de Brasília. As janelas rápidas ficam perto de quando a fonte costum
 | Agenda de divulgações | API de calendário do IBGE | 30 min (2 min enquanto não carregar) |
 | Fed: política monetária e discursos | RSS oficial + texto da página | 20 s / 60 s |
 | BCE: comunicados, discursos, entrevistas | RSS oficial + texto da página | 30 s |
+| CVM: fatos relevantes | busca oficial do RAD/ENET da CVM + texto do PDF entregue pela empresa | 30 s |
 
 `POLL_SCALE` multiplica os intervalos das fontes, inclusive os das janelas, nunca abaixo de 1 s (a agenda do IBGE não muda).
 
@@ -62,6 +63,12 @@ Com `ALPHAVANTAGE_API_KEY`, o sistema lê o NEWS_SENTIMENT a cada 2 min: notíci
 - **Modo `interno` (padrão):** as notícias vão só para a página privada de revisão. Não passam pela IA, não aparecem no site e não vão para as redes.
 - **Modo `publico`:** use só com o acordo comercial que cubra exibição pública, reescrita por IA e redes. Mesmo assim, o texto original é de terceiros (Reuters, Benzinga, CNBC…): a manchete reescreve o fato, cita o veículo e linka a matéria.
 - **Filtro de relevância:** as notas de relevância da Alpha Vantage são generosas, por isso o corte padrão é 0,8.
+
+## CVM: fatos relevantes
+
+Ligada por padrão (`CVM_FATOS=0` desliga). A cada 30 s (`CVM_INTERVALO_S`), o sistema consulta a busca de documentos da própria CVM (RAD/ENET) pelos fatos relevantes de hoje e de ontem. Para cada um novo, baixa o PDF entregue pela empresa e extrai o texto com o `pdftotext` (pacote poppler-utils, já instalado na imagem Docker; fora dela, instale com `apt-get install poppler-utils`). Sem o `pdftotext`, a manchete sai só com a empresa e o assunto. O link de cada manchete abre o documento no site da CVM.
+
+É fonte oficial e gratuita: o documento é da própria empresa, publicado pelo regulador. A manchete segue a régua de empresas da linha editorial: a empresa é a autora do fato, o "PlatomAI explica" fala do efeito no macro e nada vira recomendação.
 
 ## Partnr (em teste)
 
@@ -108,6 +115,7 @@ src/
   config.ts          variáveis de ambiente
   pipeline.ts        consulta → novo? → escreve → checa → publica → envia
   sources/feeds.ts   RSS/Atom (BCB, Copom, Fed, BCE)
+  sources/cvm.ts     fatos relevantes da CVM (RAD/ENET + texto do PDF)
   sources/alphavantage.ts, sources/partnr.ts  feeds de notícias pagos (uso interno por padrão)
   latency.ts         latência por fonte (npm run latencia)
   sources/ibge.ts    agenda, releases e SIDRA (+ Focus)

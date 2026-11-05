@@ -80,3 +80,24 @@ export async function fetchJson<T>(url: string, timeoutMs = 10_000, headers: Rec
   if (!res.ok) throw new Error(`HTTP ${res.status} em ${new URL(url).host}`);
   return (await res.json()) as T;
 }
+
+/** POST of a JSON body that answers JSON (e.g. an ASP.NET page method). */
+export async function postJson<T>(url: string, body: unknown, timeoutMs = 15_000, headers: Record<string, string> = {}): Promise<T> {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "user-agent": UA, accept: "application/json", "content-type": "application/json; charset=utf-8", ...headers },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status} em ${new URL(url).host}`);
+  return (await res.json()) as T;
+}
+
+/** Raw bytes of a download, refused above `maxBytes` (a filing is a few hundred kB). */
+export async function fetchBytes(url: string, timeoutMs = 30_000, maxBytes = 15_000_000): Promise<Buffer> {
+  const res = await fetch(url, { headers: { "user-agent": UA }, signal: AbortSignal.timeout(timeoutMs) });
+  if (!res.ok) throw new Error(`HTTP ${res.status} em ${new URL(url).host}`);
+  const buf = Buffer.from(await res.arrayBuffer());
+  if (buf.length > maxBytes) throw new Error(`arquivo grande demais em ${new URL(url).host} (${buf.length} bytes)`);
+  return buf;
+}

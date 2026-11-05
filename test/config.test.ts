@@ -146,3 +146,11 @@ test("an API key with spaces or control characters is refused without echoing it
   assert.doesNotMatch(warnings[0], /abc|def/);
   assert.equal(loadConfig({ PARTNR_API_KEY: "pk_live-123.ABC" }, () => {}).partnr.apiKey, "pk_live-123.ABC");
 });
+
+test("CVM fatos relevantes are on by default, every 30 s, and can be turned off", () => {
+  const def = loadConfig({}, () => {}).cvm;
+  assert.equal(def.enabled, true);
+  assert.equal(def.intervalMs, 30_000);
+  assert.equal(loadConfig({ CVM_FATOS: "0" }, () => {}).cvm.enabled, false);
+  assert.equal(loadConfig({ CVM_INTERVALO_S: "5" }, () => {}).cvm.intervalMs, 30_000, "below 10 s falls back to the default");
+});
