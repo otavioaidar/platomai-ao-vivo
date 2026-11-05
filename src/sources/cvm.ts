@@ -3,7 +3,7 @@
 // (poppler-utils, installed in the Docker image). Without it, the headline is written from the filing's subject only.
 import { execFile } from "node:child_process";
 import { log } from "../log.ts";
-import { fetchBytes, postJson } from "../net.ts";
+import { postJson } from "../net.ts";
 import { decodeEntities } from "../text.ts";
 import type { RawItem, Source } from "../types.ts";
 
@@ -81,8 +81,20 @@ export function viewUrl(protocol: string): string {
   return `${RAD}/frmExibirArquivoIPEExterno.aspx?NumeroProtocoloEntrega=${protocol}`;
 }
 
-function downloadUrl(f: Pick<CvmFiling, "sequence" | "version" | "protocol">): string {
-  return `${RAD}/frmDownloadDocumento.aspx?Tela=ext&numSequencia=${f.sequence}&numVersao=${f.version}&numProtocolo=${f.protocol}&descTipo=IPE&CodigoInstituicao=1`;
+/**
+ * The filed PDF, through the method the CVM's own viewer uses (base64 in JSON). The plain download link
+ * (frmDownloadDocumento) was found to cut files short, which breaks text extraction.
+ */
+async function filedPdf(protocol: string): Promise<Buffer> {
+  const res = await postJson<{ d?: string }>(
+    `${RAD}/frmExibirArquivoIPEExterno.aspx/ExibirPDF`,
+    { codigoInstituicao: "1", numeroProtocolo: protocol, token: "", versaoCaptcha: "" },
+    30_000,
+    { referer: viewUrl(protocol), "x-requested-with": "XMLHttpRequest" },
+  );
+  if (typeof res.d !== "string" || !res.d) throw new Error("CVM: documento sem conteúdo");
+  if (res.d.length > 20_000_000) throw new Error("CVM: documento grande demais");
+  return Buffer.from(res.d, "base64");
 }
 
 export function filingTitle(f: CvmFiling): string {
@@ -206,14 +218,15 @@ export function cvmSource(o: CvmOptions): Source {
       if (!f) return item; // after a restart the queued item keeps the summary written at poll time
       let pdf: Buffer;
       try {
-        pdf = await fetchBytes(downloadUrl(f), 30_000);
+        pdf = await filedPdf(f.protocol);
       } catch (err) {
         // The headline goes out with the subject now, instead of waiting hours of retries for the PDF.
         log.warn(`CVM: PDF do protocolo ${f.protocol} indisponível; a manchete sai com o assunto`, err);
         return item;
       }
-      if (pdf.subarray(0, 5).toString("latin1") !== "%PDF-") {
-        log.warn(`CVM: o documento do protocolo ${f.protocol} não é um PDF; a manchete sai com o assunto`);
+      // A whole PDF starts with %PDF- and ends with %%EOF; anything else is a partial file or not a PDF at all.
+      if (pdf.subarray(0, 5).toString("latin1") !== "%PDF-" || !pdf.subarray(-1024).toString("latin1").includes("%%EOF")) {
+        log.warn(`CVM: o documento do protocolo ${f.protocol} não veio como PDF inteiro; a manchete sai com o assunto`);
         return item;
       }
       const extracted = await extract(pdf);

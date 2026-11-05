@@ -28,6 +28,7 @@ function stubFetch(t: { after: (fn: () => void) => void }, handler: (url: string
 }
 
 const json = (v: unknown) => new Response(JSON.stringify(v), { headers: { "content-type": "application/json" } });
+const b64 = (s: string) => Buffer.from(s, "latin1").toString("base64");
 
 test("reads the RAD answer: company, subject, Brasília delivery time and the document ids", () => {
   const filings = parseRad(rad.d.dados);
@@ -78,12 +79,14 @@ test("an error answer from the CVM is a failed poll, not an empty one", async (t
 
 test("enrich downloads the filed PDF and adds its text; anything that is not a PDF keeps the summary", async (t) => {
   let pdf = true;
-  const calls = stubFetch(t, (url) => (url.includes("ListarDocumentos") ? json(rad) : new Response(pdf ? "%PDF-1.4 conteudo" : "<html>erro</html>")));
+  const calls = stubFetch(t, (url) => (url.includes("ListarDocumentos") ? json(rad) : json({ d: b64(pdf ? "%PDF-1.4 conteudo\n%%EOF" : "<html>erro</html>") })));
   const seen: Buffer[] = [];
   const src = cvmSource({ intervalMs: 30_000, extract: async (b) => (seen.push(b), "FATO RELEVANTE\nA Porto Seguro comunica as projeções de 2026.") });
   const [, porto] = await src.poll();
   const full = await src.enrich!(porto);
-  assert.match(calls[1].url, /frmDownloadDocumento\.aspx\?Tela=ext&numSequencia=1109021&numVersao=1&numProtocolo=1584315&descTipo=IPE/);
+  assert.equal(calls[1].url, "https://www.rad.cvm.gov.br/ENETWeb/frmExibirArquivoIPEExterno.aspx/ExibirPDF");
+  assert.equal(calls[1].method, "POST");
+  assert.equal(JSON.parse(calls[1].body!).numeroProtocolo, "1584315");
   assert.equal(seen[0].subarray(0, 5).toString(), "%PDF-");
   assert.match(full.body, /Assunto: Modificação de Projeções Divulgadas\.\n\nFATO RELEVANTE\nA Porto Seguro comunica as projeções de 2026\.$/);
 
@@ -162,7 +165,7 @@ test("when the PDF cannot be downloaded, the headline goes out with the subject 
 });
 
 test("enrich keeps the Portuguese half of a bilingual PDF and marks an English-only one", async (t) => {
-  stubFetch(t, (url) => (url.includes("ListarDocumentos") ? json(rad) : new Response("%PDF-1.4")));
+  stubFetch(t, (url) => (url.includes("ListarDocumentos") ? json(rad) : json({ d: b64("%PDF-1.4\n%%EOF") })));
   let text = BILINGUE;
   const src = cvmSource({ intervalMs: 30_000, extract: async () => text });
   const [, porto] = await src.poll();
@@ -175,4 +178,13 @@ test("enrich keeps the Portuguese half of a bilingual PDF and marks an English-o
   const en = await src2.enrich!(again);
   assert.equal(en.lang, "en");
   assert.match(en.body, /Porto Seguro updates its 2026 guidance\.$/);
+});
+
+test("a PDF cut short (no %%EOF at the end) is not sent to text extraction", async (t) => {
+  stubFetch(t, (url) => (url.includes("ListarDocumentos") ? json(rad) : json({ d: b64("%PDF-1.4 pela metade") })));
+  let extracted = false;
+  const src = cvmSource({ intervalMs: 30_000, extract: async () => ((extracted = true), "texto") });
+  const [, porto] = await src.poll();
+  assert.equal((await src.enrich!(porto)).body, porto.body);
+  assert.equal(extracted, false);
 });
