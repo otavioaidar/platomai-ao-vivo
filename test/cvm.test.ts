@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { test } from "node:test";
-import { brasiliaTime, cvmSource, filingTitle, parseRad, portugueseText, viewUrl } from "../src/sources/cvm.ts";
+import { brasiliaTime, cvmSource, filingTitle, inFilingWindow, parseRad, portugueseText, viewUrl } from "../src/sources/cvm.ts";
 import { unsupportedNumbers } from "../src/writer/guard.ts";
 
 // Real answer of the CVM's RAD search for fatos relevantes on 05/11/2026.
@@ -187,4 +187,16 @@ test("a PDF cut short (no %%EOF at the end) is not sent to text extraction", asy
   const [, porto] = await src.poll();
   assert.equal((await src.enrich!(porto)).body, porto.body);
   assert.equal(extracted, false);
+});
+
+test("polls faster before the open and after the close on weekdays, when fatos relevantes cluster", () => {
+  const at = (iso: string) => new Date(iso);
+  assert.equal(inFilingWindow(at("2026-11-05T21:00:00Z")), true, "Thu 18:00 in Brasília");
+  assert.equal(inFilingWindow(at("2026-11-05T10:00:00Z")), true, "Thu 07:00");
+  assert.equal(inFilingWindow(at("2026-11-05T15:00:00Z")), false, "Thu 12:00, trading hours");
+  assert.equal(inFilingWindow(at("2026-11-05T23:30:00Z")), false, "Thu 20:30, window closed");
+  assert.equal(inFilingWindow(at("2026-11-07T21:00:00Z")), false, "Saturday");
+  const src = cvmSource({ intervalMs: 30_000 });
+  assert.equal(src.hotIntervalMs!(at("2026-11-05T21:00:00Z")), 10_000);
+  assert.equal(src.hotIntervalMs!(at("2026-11-05T15:00:00Z")), null);
 });

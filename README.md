@@ -51,7 +51,7 @@ Horários de Brasília. As janelas rápidas ficam perto de quando a fonte costum
 | Agenda de divulgações | API de calendário do IBGE | 30 min (2 min enquanto não carregar) |
 | Fed: política monetária e discursos | RSS oficial + texto da página | 20 s / 60 s |
 | BCE: comunicados, discursos, entrevistas | RSS oficial + texto da página | 30 s |
-| CVM: fatos relevantes | busca oficial do RAD/ENET da CVM + texto do PDF entregue pela empresa | 30 s |
+| CVM: fatos relevantes | busca oficial do RAD/ENET da CVM + texto do PDF entregue pela empresa | 30 s; 10 s nos dias úteis, 6h30–8h30 e 17h30–20h30 |
 
 `POLL_SCALE` multiplica os intervalos das fontes, inclusive os das janelas, nunca abaixo de 1 s (a agenda do IBGE não muda).
 
