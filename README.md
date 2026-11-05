@@ -68,6 +68,13 @@ Com `ALPHAVANTAGE_API_KEY`, o sistema lê o NEWS_SENTIMENT a cada 2 min: notíci
 
 Ligada por padrão (`CVM_FATOS=0` desliga). A cada 30 s (`CVM_INTERVALO_S`), o sistema consulta a busca de documentos da própria CVM (RAD/ENET) pelos fatos relevantes de hoje e de ontem. Para cada um novo, baixa o PDF entregue pela empresa e extrai o texto com o `pdftotext` (pacote poppler-utils, já instalado na imagem Docker; fora dela, instale com `apt-get install poppler-utils`). Sem o `pdftotext`, a manchete sai só com a empresa e o assunto. O link de cada manchete abre o documento no site da CVM.
 
+Cuidados embutidos:
+
+- **Bilíngues:** a maioria dos fatos relevantes vem em português e inglês. A IA e a checagem de números recebem só a parte em português; lido como português, "R$ 12.7 billion" viraria 127 bilhões. O documento só em inglês é marcado como inglês.
+- **Reapresentação:** a versão substituída sai da lista, e a nova vira histórico no site, marcada como correção, sem alerta nas redes.
+- **PDF indisponível:** a manchete sai na hora com a empresa e o assunto, sem esperar horas de novas tentativas.
+- **CVM com captcha, sessão expirada ou formato novo:** a fonte aparece com falha em `/api/status`, em vez de parecer um dia sem fatos.
+
 É fonte oficial e gratuita: o documento é da própria empresa, publicado pelo regulador. A manchete segue a régua de empresas da linha editorial: a empresa é a autora do fato, o "PlatomAI explica" fala do efeito no macro e nada vira recomendação.
 
 ## Partnr (em teste)

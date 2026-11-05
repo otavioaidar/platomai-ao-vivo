@@ -7,7 +7,7 @@ import { fetchBytes, postJson } from "../net.ts";
 import { decodeEntities } from "../text.ts";
 import type { RawItem, Source } from "../types.ts";
 
-const RAD = "https://www.rad.cvm.gov.br/ENET";
+const RAD = "https://www.rad.cvm.gov.br/ENETWeb";
 /** Category code of "Fato Relevante" in the RAD search (IPE documents). */
 const FATO_RELEVANTE = "IPE_4_-1_-1";
 /** The text sent to the writer: enough for a filing, short enough for a prompt. */
@@ -15,6 +15,7 @@ const MAX_TEXT = 6000;
 
 export interface CvmFiling {
   protocol: string;
+  status: string;
   sequence: string;
   version: string;
   codeCvm: string;
@@ -58,7 +59,11 @@ export function parseRad(dados: string): CvmFiling[] {
     const company = clean(f[1]);
     if (!dl || !deliveredAt || !company) continue;
     const subject = (clean(f[11] ?? "") || clean(f[4]).replace(/\s*-\s*$/, "")).replace(/\.+$/, "");
+    const status = clean(f[7]);
+    // A filing replaced by a new version is no longer active: only the current one counts.
+    if (status && status !== "Ativo") continue;
     out.push({
+      status,
       sequence: dl[1],
       version: dl[2],
       protocol: dl[3],
@@ -90,7 +95,8 @@ let warnedNoPdftotext = false;
 /** Text of a PDF through poppler's pdftotext; null if the tool is missing or the file has no text layer. */
 export function pdfToText(pdf: Buffer): Promise<string | null> {
   return new Promise((resolve) => {
-    const child = execFile("pdftotext", ["-layout", "-enc", "UTF-8", "-", "-"], { timeout: 15_000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
+    // Without -layout: two-column bilingual filings come out as whole Portuguese and English blocks, not interleaved.
+    const child = execFile("pdftotext", ["-enc", "UTF-8", "-", "-"], { timeout: 15_000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
       if (err) {
         if ((err as NodeJS.ErrnoException).code === "ENOENT" && !warnedNoPdftotext) {
           warnedNoPdftotext = true;
@@ -104,6 +110,35 @@ export function pdfToText(pdf: Buffer): Promise<string | null> {
     child.stdin?.on("error", () => {}); // the tool may exit before reading everything
     child.stdin?.end(pdf);
   });
+}
+
+/** Title line where the English version of a bilingual filing starts. */
+const ENGLISH_START = /^\s*(MATERIAL FACT|RELEVANT FACT|NOTICE TO (THE )?MARKET|ANNOUNCEMENT TO THE MARKET|MARKET ANNOUNCEMENT)\b/im;
+const PORTUGUESE_TITLE = /FATO RELEVANTE|COMUNICADO AO MERCADO/i;
+/** An English decimal before a unit ("12.7 billion", "8.5%"): read the Brazilian way it would be 10 or 100 times off. */
+const ENGLISH_DECIMAL = /\d\.\d{1,3}\s*(%|percent|million|billion|thousand|bn|mn)\b/i;
+
+/**
+ * Most filings are bilingual. The writer and the number check read the text as Portuguese, where "12.7" means 127,
+ * so the English half is cut off; a filing only in English is marked as such. Stray English-decimal lines go too.
+ */
+export function portugueseText(text: string): { text: string; lang: "pt" | "en" } {
+  const pt = PORTUGUESE_TITLE.exec(text);
+  const en = ENGLISH_START.exec(text);
+  if (en && !pt) return { text, lang: "en" };
+  let part = text;
+  if (pt && en) {
+    if (en.index > pt.index) {
+      part = text.slice(0, en.index); // Portuguese first (with the company header above it), English after
+    } else {
+      // English first: keep the Portuguese version, up to an English section after it, if any.
+      const rest = text.slice(pt.index);
+      const again = ENGLISH_START.exec(rest);
+      part = again ? rest.slice(0, again.index) : rest;
+    }
+  }
+  const lines = part.split("\n").filter((l) => !ENGLISH_DECIMAL.test(l));
+  return { text: lines.join("\n").trim(), lang: "pt" };
 }
 
 function ddmmyyyy(d: Date): string {
@@ -131,25 +166,37 @@ export function cvmSource(o: CvmOptions): Source {
         dataReferencia: "", categoria: FATO_RELEVANTE, periodo: "2", horaIni: "", horaFim: "", palavraChave: "",
         ultimaDtRef: "false", tipoEmpresa: "0", token: "", versaoCaptcha: "",
       };
-      const res = await postJson<{ d?: { temErro?: boolean; msgErro?: string; dados?: string } }>(
+      const res = await postJson<{ d?: { temErro?: boolean; msgErro?: string; dados?: string | null; expirouSessao?: boolean; SolicitarCaptcha?: string } }>(
         `${RAD}/frmConsultaExternaCVM.aspx/ListarDocumentos`,
         body,
         20_000,
         { referer: `${RAD}/frmConsultaExternaCVM.aspx`, "x-requested-with": "XMLHttpRequest" },
       );
+      // Each of these used to look like a quiet day: say so instead, so the status page shows the source failing.
       if (!res.d || res.d.temErro) throw new Error(`CVM: ${res.d?.msgErro || "resposta sem documentos"}`);
+      if (res.d.SolicitarCaptcha === "S") throw new Error("CVM: a consulta pediu captcha");
+      if (res.d.expirouSessao) throw new Error("CVM: sessão expirada");
+      if (typeof res.d.dados !== "string") throw new Error("CVM: resposta sem lista");
+      const raw = res.d.dados.split("&*").filter((r) => r.split("$&").length >= 11).length;
+      const parsed = parseRad(res.d.dados);
+      if (raw > 0 && parsed.length === 0) throw new Error("CVM: formato da lista mudou");
       const items: RawItem[] = [];
-      for (const f of parseRad(res.d.dados ?? "")) {
+      for (const f of parsed) {
         filings.set(f.protocol, f);
         if (filings.size > 500) filings.delete(filings.keys().next().value!);
+        const again = Number(f.version) > 1;
         items.push({
           sourceId: "cvm-fatos",
           externalId: f.protocol,
           url: viewUrl(f.protocol),
           title: filingTitle(f),
-          body: `Fato relevante de ${f.company} (código CVM ${f.codeCvm}), entregue à CVM.${f.subject ? ` Assunto: ${f.subject}.` : ""}`,
+          body:
+            `Fato relevante de ${f.company} (código CVM ${f.codeCvm}), entregue à CVM.${f.subject ? ` Assunto: ${f.subject}.` : ""}` +
+            (again ? ` Reapresentação (versão ${f.version}) de documento já entregue: é uma correção, não um fato novo.` : ""),
           publishedAt: f.deliveredAt,
           lang: "pt",
+          // A re-filing corrects a fact already out: site history only, never a new alert on the social networks.
+          ...(again ? { stale: true } : {}),
         });
       }
       return items;
@@ -157,12 +204,24 @@ export function cvmSource(o: CvmOptions): Source {
     async enrich(item) {
       const f = filings.get(item.externalId);
       if (!f) return item; // after a restart the queued item keeps the summary written at poll time
-      const pdf = await fetchBytes(downloadUrl(f), 30_000);
-      if (pdf.subarray(0, 5).toString("latin1") !== "%PDF-") return item; // not a PDF (e.g. a zip or an error page)
-      const text = await extract(pdf);
+      let pdf: Buffer;
+      try {
+        pdf = await fetchBytes(downloadUrl(f), 30_000);
+      } catch (err) {
+        // The headline goes out with the subject now, instead of waiting hours of retries for the PDF.
+        log.warn(`CVM: PDF do protocolo ${f.protocol} indisponível; a manchete sai com o assunto`, err);
+        return item;
+      }
+      if (pdf.subarray(0, 5).toString("latin1") !== "%PDF-") {
+        log.warn(`CVM: o documento do protocolo ${f.protocol} não é um PDF; a manchete sai com o assunto`);
+        return item;
+      }
+      const extracted = await extract(pdf);
+      if (!extracted) return item;
+      const { text, lang } = portugueseText(extracted);
       if (!text) return item;
       const cut = text.length > MAX_TEXT ? `${text.slice(0, MAX_TEXT)} […]` : text;
-      return { ...item, body: `${item.body}\n\n${cut}` };
+      return { ...item, body: `${item.body}\n\n${cut}`, lang };
     },
   };
 }

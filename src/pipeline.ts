@@ -177,8 +177,13 @@ export class Pipeline {
       .filter(({ item }) => !this.o.store.isSeen(rawKey(item)))
       .sort((a, b) => a.item.publishedAt.localeCompare(b.item.publishedAt) || b.i - a.i)
       .map(({ item }) => item);
-    if (!fresh.length) return;
     const bootstrap = !this.o.store.hasSeenAny(src.id);
+    if (!fresh.length) {
+      // A first successful poll that comes back empty (a filings source on a weekend) still counts as the first
+      // contact, so the first items found later are live news, not first-load history.
+      if (bootstrap) this.o.store.markSeen(`${src.id}:__inicio__`, src.id);
+      return;
+    }
     let todo = fresh;
     if (bootstrap) {
       // First contact with a source: show only its latest few items, as history, and skip old numeric releases.

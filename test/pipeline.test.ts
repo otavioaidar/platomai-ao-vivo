@@ -590,3 +590,16 @@ test("runDue writes queued retries without polling the source", async () => {
   assert.equal(polls, 2, "the retry did not poll again");
   hub.close();
 });
+
+test("a first successful poll that comes back empty counts as first contact: later items are live news", async () => {
+  const fresh = item("1", "Fato relevante novo", 0);
+  const { p, src, pub, hub } = setup([[], [fresh]]);
+  assert.deepEqual(await p.runOnce(src), []);
+  const [h] = await p.runOnce(src);
+  assert.equal(h.headline, "Fato relevante novo");
+  assert.equal(h.backfill, false);
+  assert.equal(h.history, undefined);
+  await sleep(10);
+  assert.equal(pub.sent.length, 1, "it went to the social networks like any live headline");
+  hub.close();
+});
