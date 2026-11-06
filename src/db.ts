@@ -265,12 +265,13 @@ export class Store {
    * Recent public headlines from the same tag, so the writer does not repeat a fact already published.
    * Headlines waiting for review never went public, so they are left out.
    */
-  recentByTag(tag: string, sinceIso: string, limit = 15): Headline[] {
+  recentByTag(tag: string | string[], sinceIso: string, limit = 15): Headline[] {
+    const tags = JSON.stringify(Array.isArray(tag) ? tag : [tag]);
     const rows = this.stmt(
       `SELECT json FROM headlines
-       WHERE json_extract(json, '$.tag') = ? AND status = 'publicado' AND published_at >= ?
+       WHERE json_extract(json, '$.tag') IN (SELECT value FROM json_each(?)) AND status = 'publicado' AND published_at >= ?
        ORDER BY published_at DESC LIMIT ?`,
-    ).all(tag, sinceIso, limit) as { json: string }[];
+    ).all(tags, sinceIso, limit) as { json: string }[];
     return rows.map((r) => JSON.parse(r.json) as Headline);
   }
 

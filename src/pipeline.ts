@@ -49,6 +49,11 @@ const DECIFRA_RETRY_MS = 60_000;
 const DECIFRA_MAX_ATTEMPTS = 5;
 /** How often the analysis queue is checked for retries and for jobs left over from before a restart. */
 const DECIFRA_PUMP_MS = 30_000;
+/**
+ * Tags whose feeds carry the same stories: the BCB's press notes also publish the Copom statement. The writer sees
+ * the recent headlines of both, so the same decision is not published twice.
+ */
+const RELATED_TAGS: Record<string, string[]> = { BCB: ["COPOM"], COPOM: ["BCB"] };
 
 export function rawKey(item: RawItem): string {
   return `${item.sourceId}:${item.externalId}`;
@@ -278,7 +283,7 @@ export class Pipeline {
     }
 
     const since = new Date(this.now() - 6 * 3600 * 1000).toISOString();
-    const recent = this.o.store.recentByTag(src.tag, since);
+    const recent = this.o.store.recentByTag([src.tag, ...(RELATED_TAGS[src.tag] ?? [])], since);
     const draft = await this.ai.run(() => this.o.writer.write(item, { source: src, recent }));
     // A refusal is a final answer, but the fact may matter: keep it for a human to look at.
     if (!draft) return this.commit(job, this.review(src, item, job, "IA recusou o item"));

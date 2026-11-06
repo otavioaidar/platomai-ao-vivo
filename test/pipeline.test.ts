@@ -899,3 +899,13 @@ test("a decifra whose answer cannot be saved still counts the attempt, and a fin
   await t.p.drain(2000);
   assert.equal(t.store.get(h2.id)?.decifra?.status, "publicado");
 });
+
+test("the writer of the BCB notes also sees the recent Copom headlines, so the same decision is not published twice", async () => {
+  const { store, writer, p, src } = setup([[], [item("2", "Copom mantém a taxa Selic em 13,75% a.a.")]]);
+  const base: Omit<Headline, "id" | "publishedAt" | "tag" | "headline"> = { sourcePublishedAt: "", detectedAt: "", sourceId: "bcb-copom", sourceName: "Copom", region: "BR", urgency: "urgente", explainer: null, topics: [], url: "", method: "ia", status: "publicado", backfill: false, latencyMs: 0 };
+  store.save({ ...base, id: "copom-1", publishedAt: new Date().toISOString(), tag: "COPOM", headline: "Copom mantém Selic em 13,75% ao ano" });
+  store.save({ ...base, id: "fed-1", publishedAt: new Date().toISOString(), tag: "FED", headline: "Fed mantém juros" });
+  await p.runOnce(src); // the fake source has tag BCB
+  await p.runOnce(src);
+  assert.deepEqual(writer.recent.at(-1)?.map((h) => h.id), ["copom-1"]);
+});
