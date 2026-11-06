@@ -51,6 +51,7 @@ const decifra = ai.enabled && dc.enabled
       mode: dc.mode,
       concurrency: dc.concurrency,
       sources: dc.sources,
+      cvmMinUrgency: dc.cvmMinUrgency,
     }
   : undefined;
 const publishers = buildPublishers(config);
@@ -114,7 +115,7 @@ server.on("error", (err) => {
 server.listen(config.port, config.host, () => {
   log.info(`PlatomAI Ao Vivo em http://localhost:${config.port}`, {
     ia: writer.enabled ? `${writer.model} (esforço ${config.ai.effort})` : "desligada (rascunhos)",
-    decifra: decifra ? `${dc.model} (esforço ${dc.effort}, publicação ${dc.mode}, fontes ${dc.sources.join(",")})` : ai.enabled ? "desligado" : "desligado (sem IA)",
+    decifra: decifra ? `${dc.model} (esforço ${dc.effort}, publicação ${dc.mode}, fontes ${dc.sources.join(",")}, CVM a partir de ${dc.cvmMinUrgency})` : ai.enabled ? "desligado" : "desligado (sem IA)",
     imprensa: config.press.outlets.length ? config.press.outlets.join(", ") : "desligada",
     fontes: sources.length,
     redes: publishers.map((p) => `${p.name}:${p.live ? "ao vivo" : "simulação"}`),

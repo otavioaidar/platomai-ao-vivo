@@ -31,6 +31,8 @@ export interface PipelineOptions {
     concurrency: number;
     /** Source ids or id prefixes that get a decifra ("bcb" covers bcb-copom); empty or absent: every official source. */
     sources?: string[];
+    /** Fatos relevantes (cvm-*) get a decifra only from this urgency up; absent: every one. */
+    cvmMinUrgency?: Urgency;
   };
   /** Clock in epoch ms; tests pass a fake one. */
   now?: () => number;
@@ -369,7 +371,10 @@ export class Pipeline {
   private wantsDecifra(src: Source, h: Headline): boolean {
     const d = this.o.decifra;
     if (!d || src.kind !== "oficial" || h.status !== "publicado" || h.backfill || h.internalOnly || h.method === "rascunho") return false;
-    return !d.sources?.length || d.sources.some((p) => src.id === p || src.id.startsWith(`${p}-`));
+    if (d.sources?.length && !d.sources.some((p) => src.id === p || src.id.startsWith(`${p}-`))) return false;
+    // Only the fatos relevantes the editorial line ranks as relevant: routine filings keep their headline, without analysis.
+    if (src.id.startsWith("cvm") && d.cvmMinUrgency && !meetsUrgency(h, d.cvmMinUrgency)) return false;
+    return true;
   }
 
   /**

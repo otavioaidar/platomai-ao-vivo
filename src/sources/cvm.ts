@@ -173,9 +173,19 @@ function ddmmyyyy(d: Date): string {
   return `${v("day")}/${v("month")}/${v("year")}`;
 }
 
+/**
+ * A company sometimes delivers the same fato relevante twice in the same minute (Lojas Renner, 05/11/2026,
+ * protocols 1584842 and 1584843): same company, subject, version and delivery time is one story.
+ */
+function twinKey(f: CvmFiling): string | null {
+  return f.subject ? `${f.codeCvm}|${f.subject.toLowerCase()}|${f.version}|${f.deliveredAt}` : null;
+}
+
 export function cvmSource(o: CvmOptions): Source {
   const extract = o.extract ?? pdfToText;
   const filings = new Map<string, CvmFiling>();
+  /** Twin key → the protocol kept for it: the lowest of the first answer that listed it. */
+  const kept = new Map<string, string>();
   return {
     id: "cvm-fatos",
     name: "CVM (fatos relevantes)",
@@ -208,8 +218,19 @@ export function cvmSource(o: CvmOptions): Source {
       const raw = res.d.dados.split("&*").filter((r) => r.split("$&").length >= 11).length;
       const parsed = parseRad(res.d.dados);
       if (raw > 0 && parsed.length === 0) throw new Error("CVM: formato da lista mudou");
+      // Within one answer the lowest protocol wins; a twin listed in a later poll never replaces the one already kept.
+      const lowest = new Map<string, string>();
+      for (const f of parsed) {
+        const key = twinKey(f);
+        const cur = key ? lowest.get(key) : undefined;
+        if (key && (!cur || Number(f.protocol) < Number(cur))) lowest.set(key, f.protocol);
+      }
+      for (const [key, protocol] of lowest) if (!kept.has(key)) kept.set(key, protocol);
+      while (kept.size > 500) kept.delete(kept.keys().next().value!);
       const items: RawItem[] = [];
       for (const f of parsed) {
+        const key = twinKey(f);
+        if (key && kept.get(key) !== f.protocol) continue; // a twin of a filing already listed
         filings.set(f.protocol, f);
         if (filings.size > 500) filings.delete(filings.keys().next().value!);
         const again = Number(f.version) > 1;

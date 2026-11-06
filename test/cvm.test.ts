@@ -200,3 +200,23 @@ test("polls faster before the open and after the close on weekdays, when fatos r
   assert.equal(src.hotIntervalMs!(at("2026-11-05T21:00:00Z")), 10_000);
   assert.equal(src.hotIntervalMs!(at("2026-11-05T15:00:00Z")), null);
 });
+
+test("the same fato relevante delivered twice in the same minute is one item", async (t) => {
+  const recs = rad.d.dados.split("&*");
+  // A copy of the Porto Seguro filing under another protocol: same company, subject, version and minute.
+  const twin = recs[1].replace("'1109021','1','1584315'", "'1109022','1','1584316'");
+  stubFetch(t, () => json({ d: { temErro: false, dados: [twin, recs[1], recs[0], ""].join("&*") } }));
+  const src = cvmSource({ intervalMs: 30_000, extract: async () => null });
+  const items = await src.poll();
+  assert.deepEqual(items.map((i) => i.externalId).sort(), ["1584315", "1584324"], "the lower protocol is kept");
+  // A later poll that lists only the twin still does not bring it back.
+  stubFetch(t, () => json({ d: { temErro: false, dados: [twin, ""].join("&*") } }));
+  assert.deepEqual(await src.poll(), []);
+
+  // The other way round: the copy listed first is kept, and the original listed later is not a second story.
+  const other = cvmSource({ intervalMs: 30_000, extract: async () => null });
+  stubFetch(t, () => json({ d: { temErro: false, dados: [twin, ""].join("&*") } }));
+  assert.deepEqual((await other.poll()).map((i) => i.externalId), ["1584316"]);
+  stubFetch(t, () => json({ d: { temErro: false, dados: [twin, recs[1], ""].join("&*") } }));
+  assert.deepEqual((await other.poll()).map((i) => i.externalId), ["1584316"]);
+});

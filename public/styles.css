@@ -543,7 +543,9 @@ button, input { font: inherit; color: inherit; }
 }
 .t-expl-lbl { color: var(--purple-text); font-weight: 600; }
 
-/* Press titles: the outlet's credit */
+/* Press titles: the title links to the outlet's story; the outlet's credit beside it */
+.t-link { color: inherit; text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 3px; }
+.t-link:hover { color: var(--purple-text-hover); text-decoration-color: currentColor; }
 .t-credit { color: var(--muted); font-size: 13px; white-space: nowrap; }
 
 /* "PlatomAI decifra" card */

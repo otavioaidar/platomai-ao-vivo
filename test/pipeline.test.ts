@@ -11,7 +11,7 @@ import { errorText } from "../src/log.ts";
 import { Pipeline, keepRefreshed, nextDelayMs, releaseText, retryDelayMs } from "../src/pipeline.ts";
 import type { Publisher } from "../src/publishers/index.ts";
 import type { WriteContext, Writer, WriterDraft } from "../src/writer/ai.ts";
-import type { Draft, Headline, IndicatorRelease, RawItem, Source } from "../src/types.ts";
+import type { Draft, Headline, IndicatorRelease, RawItem, Source, Urgency } from "../src/types.ts";
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -640,6 +640,7 @@ function setupDecifra(
   kind: Source["kind"] = "oficial",
   batches: RawItem[][] = [[], [item("1", "Copom mantém Selic em 13,75%")]],
   sources?: string[],
+  cvmMinUrgency?: Urgency,
 ) {
   const store = new Store(":memory:");
   const hub = new Hub(60_000);
@@ -651,7 +652,7 @@ function setupDecifra(
   const clock = { t: Date.now() };
   const p = new Pipeline({
     store, writer, hub, publishers: [pub], minUrgency: "alta", backfillPerSource: 2, showReview: false, aiConcurrency: 2,
-    decifra: { writer: decifrador, mode, concurrency: 1, sources }, now: () => clock.t,
+    decifra: { writer: decifrador, mode, concurrency: 1, sources, cvmMinUrgency }, now: () => clock.t,
   });
   const src = { ...fakeSource(batches), kind };
   return { store, writer, pub, decifrador, sent, p, clock, src };
@@ -816,4 +817,27 @@ test("DECIFRA_FONTES limits the decifra to the sources listed, by id or id prefi
   await on.p.runOnce(on.src);
   await on.p.drain(2000);
   assert.equal(on.decifrador.calls.length, 1);
+});
+
+test("a fato relevante gets a decifra only when the writer ranks it from DECIFRA_CVM_URGENCIA up", async () => {
+  const run = async (urgency: Urgency) => {
+    const s = setupDecifra("automatica", "oficial", undefined, undefined, "alta");
+    s.writer.draft = (i) => ({ publish: true, urgency, headline: i.title, explainer: null, topics: [], reason: "", method: "ia" });
+    const cvm = { ...s.src, id: "cvm-fatos" };
+    await s.p.runOnce(cvm);
+    await s.p.runOnce(cvm);
+    await s.p.drain(2000);
+    return s.decifrador.calls.length;
+  };
+  assert.equal(await run("normal"), 0, "routine filing: headline only");
+  assert.equal(await run("alta"), 1);
+  assert.equal(await run("urgente"), 1);
+
+  // Other official sources are not gated by it.
+  const bcb = setupDecifra("automatica", "oficial", undefined, undefined, "alta");
+  bcb.writer.draft = (i) => ({ publish: true, urgency: "normal", headline: i.title, explainer: null, topics: [], reason: "", method: "ia" });
+  await bcb.p.runOnce(bcb.src);
+  await bcb.p.runOnce(bcb.src);
+  await bcb.p.drain(2000);
+  assert.equal(bcb.decifrador.calls.length, 1);
 });

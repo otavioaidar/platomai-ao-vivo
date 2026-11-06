@@ -94,11 +94,14 @@ Com `PARTNR_API_KEY`, o sistema consulta a lista de notícias da Partnr a cada 1
 - **O que entra:** só o título como o veículo escreveu, o nome do veículo ao lado e o link para a matéria. O texto da matéria nunca é guardado nem mostrado, e nada da imprensa vai para a IA ou para as redes. O título isolado não tem proteção autoral (Lei 9.610, art. 8º, VI); o texto tem, e vários veículos proíbem uso por IA.
 - **O que fica de fora:** títulos com ticker da B3 (PETR4, BODB11: em geral, indicação de papel; fatos de empresas vêm dos fatos relevantes da CVM), recomendação, preço-alvo, "onde investir", publicidade, cupom, concurso, loteria e blogs "ao vivo". Em feeds gerais, só as seções de economia, política e mundo.
 - **Uma vez por história:** a mesma notícia de outro veículo nas últimas 6 h (títulos com quase todas as palavras-chave em comum) não entra de novo.
-- **No site:** etiqueta IMPRENSA, crédito "— InfoMoney" e link "ler ↗". Os filtros "Oficiais" e "Imprensa" separam as duas coisas.
+- **No site:** etiqueta IMPRENSA, o próprio título é o link para a matéria no site do veículo, o crédito "— InfoMoney" fica ao lado e há ainda o link "ler ↗". Os links não levam `nofollow` nem `noreferrer`: o veículo recebe o crédito nos buscadores e vê a PlatomAI como origem das visitas. Os filtros "Oficiais" e "Imprensa" separam as duas coisas.
+- **Para os buscadores:** a página inicial já sai do servidor com as últimas 100 manchetes no HTML (títulos, links e os decifra publicados), então buscadores que não rodam JavaScript também enxergam tudo; o JavaScript assume a lista ao vivo quando ela carrega.
 - `IMPRENSA_FONTES` escolhe os veículos (`agenciabrasil`, `infomoney`, `poder360`, `g1`, `moneytimes`, `folha`; `nenhuma` desliga). A Agência Brasil fica só no título até a EBC confirmar a licença do texto.
 
 ## PlatomAI decifra
 
+- **Fatos relevantes:** só os que a linha editorial classifica como urgência "alta" ou "urgente" (fusão, aquisição, mudança de controle, recuperação judicial, oferta de ações, revisão de projeções, dividendo extraordinário) recebem decifra; os de rotina ficam só com a manchete. `DECIFRA_CVM_URGENCIA` muda o corte, e editar a seção "Urgência" de `editorial/linha-editorial.md` muda o que conta como relevante. Fato relevante entregue duas vezes no mesmo minuto (mesma empresa e assunto) vira uma notícia só.
+- **No site:** onde há decifra publicado, ele ocupa o lugar do "PlatomAI explica" (no site, na página do servidor e no RSS). O "explica" continua aparecendo enquanto o decifra espera aprovação.
 - **O que é:** para cada manchete oficial ao vivo (Copom, BCB, Fed, BCE, IBGE, CVM), o agente de `editorial/agente-analise.md` escreve título, subtítulo, Resumo, PlatomAI decifra, Impacto nos mercados e Mensagem-chave, ou responde `NÃO VALE TEXTO | motivo` quando a notícia não muda a leitura de mercado. Histórico, itens em revisão e imprensa não recebem decifra.
 - **Checagem automática:** tetos de palavras do prompt (título 14, subtítulo 26, Resumo 60, decifra 75 em até 2 parágrafos, Impacto de 1 a 4 tópicos de até 16 palavras, Mensagem-chave 35, total 270), data no formato "4 de novembro de 2026", fonte citada no Resumo, todo número existindo no documento, expressões vetadas, qualquer coisa que pareça recomendação, "hoje/ontem" e trechos de 12 palavras copiados da fonte (fora de aspas). Se algo falhar, o agente reescreve uma vez com a lista de problemas; o que sobrar aparece em vermelho para quem revisa.
 - **Publicação:** com `DECIFRA_PUBLICACAO=revisao` (padrão), todo texto espera "Aprovar e publicar" em `/revisao`; aprovado, ele aparece no site na hora, num quadro "PlatomAI decifra" abaixo da manchete. Com `automatica`, o texto que passa em todas as checagens vai direto. "Copiar texto" leva o texto no formato do agente para os outros apps.
@@ -154,6 +157,7 @@ src/
   publishers/        Telegram e Bluesky
   server.ts, hub.ts  HTTP, SSE, RSS, revisão
   view.ts            o que o público vê de cada manchete
+  render.ts          as últimas manchetes no HTML da página inicial (buscadores e primeira pintura)
 public/              site (HTML/CSS/JS, sem build)
 editorial/           linha editorial (redator) e prompt do agente de análise (decifra)
 certs/               certificado intermediário que o servidor do IBGE não envia

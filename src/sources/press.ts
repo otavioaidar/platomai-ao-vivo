@@ -53,6 +53,8 @@ const SKIP: RegExp[] = [
   /pre[çc]o[- ]alvo|recomenda(?:ção|ções)? de (?:compra|venda)|recomendam? (?:a )?(?:compra|venda)|carteira (?:recomendada|de ações|de dividendos|de fiis)|onde investir|vale a pena|para (?:comprar|investir|lucrar)|(?<![\p{L}])compre(?![\p{L}])|comprar ou vender|hora de (?:comprar|vender)|melhores (?:ações|fundos|fiis|investimentos|bdrs)|ações (?:para|que podem)|renda (?:extra|passiva)|dividendos (?:para|de até)/iu,
   /desconto|imperdível|cupom|black friday|patrocinad|publieditorial|conteúdo de marca|inscrições|concurso|vagas|mega-sena|loteria|lotofácil|quina|horóscopo/iu,
   /(?:^|\s)ao vivo(?::|\s*[-–|])/iu,
+  // How-to service pieces ("Como criar codornas…", "Saiba como declarar…"), not market news.
+  /^(?:saiba |veja |aprenda )?como (?:criar|fazer|montar|plantar|cultivar|cuidar|declarar|sacar|consultar|calcular|economizar|ganhar|abrir|cadastrar|emitir|tirar|pedir|receber|limpar|preparar)(?![\p{L}])/iu,
 ];
 
 export function skipTitle(title: string): boolean {

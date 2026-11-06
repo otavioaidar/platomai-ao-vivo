@@ -26,6 +26,8 @@ test("keeps news titles and drops stock picks, ads, live blogs and service piece
     "IBGE abre inscrições para concurso com mais de 27 mil vagas",
     "Mega-Sena pode pagar R$ 55 milhões nesta sexta-feira",
     "Banco eleva preço-alvo da Petrobras",
+    "Como criar codornas para produção de carne e ovos",
+    "Saiba como declarar o Imposto de Renda 2027",
   ]) assert.equal(skipTitle(t), true, t);
   for (const t of [
     "Governo prorroga imposto de 12% sobre exportação de petróleo até dezembro",
@@ -34,6 +36,7 @@ test("keeps news titles and drops stock picks, ads, live blogs and service piece
     "Ações de gigantes da tecnologia derretem com dúvidas sobre o futuro da IA",
     "TCU recomenda ao governo revisar meta de arrecadação",
     "Inadimplência na carteira de crédito dos bancos sobe em outubro",
+    "Como a alta do petróleo chega ao preço da gasolina",
   ]) assert.equal(skipTitle(t), false, t);
 });
 

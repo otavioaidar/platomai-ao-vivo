@@ -168,6 +168,12 @@ export function loadConfig(env: Env, warn: (msg: string) => void = (msg) => log.
       concurrency: r.num("DECIFRA_CONCORRENCIA", 2, 1, 5, true),
       /** Which official sources get a decifra, by id or id prefix ("bcb", "fed", "bcb-copom", "cvm"…). */
       sources: r.list("DECIFRA_FONTES", DECIFRA_SOURCES, (v) => /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(v), "use prefixos como bcb, fed, ecb, ibge, sidra, cvm"),
+      /**
+       * Fatos relevantes get a decifra only from this urgency up. The headline writer sets it from the "Urgência" section
+       * of the editorial line (alta: M&A, change of control, judicial recovery, share offering, revised projections,
+       * extraordinary dividend…), so editing that file changes which fatos relevantes are analysed.
+       */
+      cvmMinUrgency: r.oneOf("DECIFRA_CVM_URGENCIA", URGENCIES, "alta"),
       promptPath: r.str("DECIFRA_PROMPT", "editorial/agente-analise.md"),
     },
     /** Press feeds: the outlet's title, credit and link, never rewritten and never sent to the AI. */

@@ -162,7 +162,7 @@ test("the app's own Anthropic key turns the AI on; decifra and press have safe d
   assert.equal(config.ai.baseUrl, "https://api.anthropic.com");
   assert.deepEqual(config.decifra, {
     enabled: true, mode: "revisao", model: "claude-opus-5-5", effort: "medium", concurrency: 2, promptPath: "editorial/agente-analise.md",
-    sources: ["bcb", "fed", "ecb", "ibge", "sidra", "cvm"],
+    sources: ["bcb", "fed", "ecb", "ibge", "sidra", "cvm"], cvmMinUrgency: "alta",
   });
   assert.deepEqual(config.press.outlets, ["agenciabrasil", "infomoney", "poder360", "g1", "moneytimes"]);
   assert.equal(config.press.intervalMs, 60_000);

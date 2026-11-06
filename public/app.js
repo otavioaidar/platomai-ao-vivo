@@ -251,6 +251,7 @@ const state = {
   unread: 0,
   agenda: null,
   agendaFailed: false,
+  ssr: false,          // the page came with the latest headlines rendered by the server
   status: null,
   statusFailed: false,
 };
@@ -391,7 +392,10 @@ function buildRow(item) {
   const text = h('p', { class: 't-text' });
   if (item.urgency === 'urgente') text.append(h('span', { class: 'flag flag-urgente' }, 'URGENTE'), ' ');
   else if (item.urgency === 'alta') text.append(h('span', { class: 'flag flag-alta' }, 'ALTA'), ' ');
-  text.append(h('span', { class: 't-head', lang: item.lang }, item.headline));
+  // A press title is the outlet's: it links straight to their story (traffic and SEO for whoever wrote it).
+  text.append(item.press && item.url
+    ? h('a', { class: 't-head t-link', href: item.url, target: '_blank', rel: 'noopener', lang: item.lang }, item.headline)
+    : h('span', { class: 't-head', lang: item.lang }, item.headline));
   // Press titles carry the outlet's name next to them: the title is theirs.
   if (item.press && item.sourceName) text.append(' ', h('span', { class: 't-credit' }, `— ${item.sourceName}`));
   if (item.status === 'revisar') text.append(' ', h('span', { class: 'badge' }, 'em revisão'));
@@ -414,7 +418,8 @@ function buildRow(item) {
     );
   }
 
-  if (item.explainer) {
+  // Where there is a PlatomAI decifra, it takes the place of the one-line explainer.
+  if (item.explainer && !item.decifra) {
     node.append(
       h('p', { class: `t-expl${freshExplainer.has(item.id) ? ' is-fresh' : ''}` },
         h('span', { class: 't-expl-lbl' }, 'PlatomAI explica:'), ' ', item.explainer),
@@ -493,6 +498,12 @@ function setText(node, text) {
 
 /** Renders the tape and returns how many headlines are shown out of the total. */
 function renderFeed() {
+  // The server sends the latest headlines inside the page (for search engines and a fast first paint): they stay
+  // until the live list has loaded, and then the live list takes their place.
+  if (state.ssr) {
+    if (!state.loaded) return { shown: 0, total: 0 };
+    state.ssr = false;
+  }
   const all = sortedItems();
   const visible = all.filter((it) => passesFilter(it) && passesSearch(it));
   const todayKey = dayKey(Date.now());
@@ -505,6 +516,8 @@ function renderFeed() {
   }
 
   const focusedId = document.activeElement?.closest?.('.row')?.dataset.id;
+  // Give focus back to the same kind of link (the press title or the source link) when a row is rebuilt.
+  const focusedSel = document.activeElement?.classList?.contains('t-link') ? '.t-link' : '.t-src';
 
   const sections = [];
   for (const [key, items] of groups) {
@@ -525,7 +538,7 @@ function renderFeed() {
 
   // If an update replaced the row that had focus, give focus back to the new link.
   if (focusedId && !el.feed.contains(document.activeElement)) {
-    rowCache.get(focusedId)?.node.querySelector('.t-src')?.focus({ preventScroll: true });
+    rowCache.get(focusedId)?.node.querySelector(focusedSel)?.focus({ preventScroll: true });
   }
 
   el.feed.setAttribute('aria-busy', String(!state.loaded && !state.loadFailed));
@@ -1160,6 +1173,7 @@ function init() {
   tick();
   setTimeout(() => { tick(); setInterval(tick, 1000); }, 1000 - (Date.now() % 1000));
 
+  state.ssr = el.feed.children.length > 0;
   renderFeed();
   renderAgenda();
   renderStatus();

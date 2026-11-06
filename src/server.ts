@@ -3,6 +3,7 @@ import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { log } from "./log.ts";
+import { feedHtml } from "./render.ts";
 import { escapeHtml } from "./text.ts";
 import { publicHeadline } from "./view.ts";
 import type { Store } from "./db.ts";
@@ -90,14 +91,59 @@ function badRequest(res: http.ServerResponse) {
 function rss(deps: ServerDeps): string {
   const items = deps.store
     .latest(50)
+    .map(publicHeadline)
     .map((h) => {
-      const desc = h.explainer ? `PlatomAI explica: ${h.explainer}` : h.headline;
+      // Where there is a PlatomAI decifra, it takes the place of the one-line explainer.
+      const desc = h.decifra
+        ? `PlatomAI decifra: ${h.decifra.title}. ${h.decifra.subtitle}`
+        : h.explainer ? `PlatomAI explica: ${h.explainer}` : h.headline;
       const url = webUrl(h.url);
       const source = url ? `<source url="${xmlText(url)}">${xmlText(h.sourceName)}</source>` : "";
       return `<item><title>${xmlText(`${h.tag}: ${h.headline}`)}</title><link>${xmlText(`${deps.siteUrl}/#${h.id}`)}</link><guid isPermaLink="false">${xmlText(h.id)}</guid><pubDate>${new Date(h.publishedAt).toUTCString()}</pubDate><description>${xmlText(desc)}</description>${source}</item>`;
     })
     .join("");
   return `<?xml version="1.0" encoding="utf-8"?><rss version="2.0"><channel><title>PlatomAI Ao Vivo</title><link>${xmlText(deps.siteUrl)}</link><description>Notícias rápidas do mercado a partir de fontes oficiais.</description><language>pt-BR</language>${items}</channel></rss>`;
+}
+
+/** Where public/index.html takes the server-rendered headlines. */
+const FEED_MARK = "<!--manchetes-->";
+/** How many headlines go inside the page, and for how long one rendering is reused. */
+const PAGE_HEADLINES = 100;
+const PAGE_CACHE_MS = 5000;
+
+/**
+ * The home page with the latest headlines already in its HTML: search engines that do not run JavaScript see every
+ * story and every link to the outlets, and readers see the list before the live one loads.
+ */
+function indexPage(deps: ServerDeps) {
+  let template: { mtime: number; html: string } | null = null;
+  let page: { at: number; html: string } | null = null;
+  return (res: http.ServerResponse) => {
+    const file = path.join(deps.publicDir, "index.html");
+    let mtime: number;
+    try {
+      mtime = fs.statSync(file).mtimeMs;
+      if (!template || template.mtime !== mtime) {
+        template = { mtime, html: fs.readFileSync(file, "utf8") };
+        page = null;
+      }
+    } catch {
+      res.writeHead(404, { "content-type": "text/plain; charset=utf-8" }).end("Não encontrado");
+      return;
+    }
+    const now = Date.now();
+    if (!page || now - page.at > PAGE_CACHE_MS) {
+      let feed = "";
+      try {
+        feed = feedHtml(deps.store.latest(PAGE_HEADLINES, deps.showReview), new Date(now));
+      } catch (err) {
+        log.warn("manchetes da página indisponíveis; a página sai sem elas", err); // the live list still loads
+      }
+      page = { at: now, html: template.html.replace(FEED_MARK, feed) };
+    }
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-cache" });
+    res.end(page.html);
+  };
 }
 
 function serveStatic(deps: ServerDeps, urlPath: string, res: http.ServerResponse) {
@@ -159,7 +205,7 @@ function decifraAction(deps: ServerDeps, req: http.IncomingMessage, res: http.Se
   return json(res, { ok: true, status: saved.decifra?.status });
 }
 
-function route(deps: ServerDeps, req: http.IncomingMessage, res: http.ServerResponse) {
+function route(deps: ServerDeps, index: (res: http.ServerResponse) => void, req: http.IncomingMessage, res: http.ServerResponse) {
   const url = URL.parse(req.url ?? "/", "http://localhost");
   if (!url) return badRequest(res);
   const action = url.pathname.match(DECIFRA_ACTION);
@@ -198,6 +244,9 @@ function route(deps: ServerDeps, req: http.IncomingMessage, res: http.ServerResp
       res.writeHead(200, { "content-type": "application/rss+xml; charset=utf-8", "cache-control": "max-age=15" });
       return res.end(body);
     }
+    case "/":
+    case "/index.html":
+      return index(res);
     case "/healthz":
       return json(res, { ok: true });
     case "/revisao":
@@ -213,10 +262,11 @@ function route(deps: ServerDeps, req: http.IncomingMessage, res: http.ServerResp
 }
 
 export function createServer(deps: ServerDeps): http.Server {
+  const index = indexPage(deps);
   return http.createServer((req, res) => {
     for (const [name, value] of Object.entries(SECURITY_HEADERS)) res.setHeader(name, value);
     try {
-      route(deps, req, res);
+      route(deps, index, req, res);
     } catch (err) {
       // Last resort: one bad request must never take down the site, the live stream and the polling.
       log.error(`falha ao responder ${req.method} ${JSON.stringify((req.url ?? "").slice(0, 200))}`, err);
