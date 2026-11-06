@@ -59,3 +59,22 @@ button.ghost { background: transparent; color: var(--muted); border: 1px solid v
 .kind.check { border-color: var(--red-border); color: var(--red); }
 .headline { font-weight: 600; overflow-wrap: anywhere; }
 .reason { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+
+/* PlatomAI decifra waiting for approval */
+.dec-box { margin: 0 0 28px; }
+.dec-box h2 { font-family: var(--font-display); font-size: 20px; margin: 0 0 4px; }
+.hint { color: var(--muted); font-size: 13.5px; margin: 0 0 12px; max-width: 75ch; }
+.kind.dec-kind { border-color: var(--purple-border); color: var(--purple-text); }
+.checks { margin: 4px 0; padding: 8px 12px 8px 28px; border: 1px solid var(--red-border); border-radius: 8px; color: var(--red); font-size: 13.5px; }
+.dec-text { margin: 6px 0 4px; padding: 14px 16px; border: 1px solid var(--purple-border); border-radius: 10px; background: rgba(148, 0, 255, 0.08); max-width: 72ch; }
+.dec-text h2 { font-family: var(--font-display); font-size: 21px; line-height: 1.3; margin: 0 0 6px; }
+.dec-text h3 { font-family: var(--font-display); font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--purple-text); margin: 14px 0 4px; }
+.dec-text p { margin: 0 0 8px; }
+.dec-text ul { margin: 0; padding-left: 20px; }
+.dec-sub { font-weight: 500; }
+.dec-date { color: var(--muted); font-size: 13px; }
+.dec-sign { color: var(--purple-text); font-weight: 600; font-size: 13px; margin-top: 12px !important; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+button:disabled { opacity: .5; cursor: default; }
+.skip-box { margin-top: 14px; }
+.skip-box summary { cursor: pointer; color: var(--muted); font-size: 14px; }

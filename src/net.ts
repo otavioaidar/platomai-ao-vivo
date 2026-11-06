@@ -28,6 +28,21 @@ export function installExtraCAs(dir = "certs"): number {
   return pems.length;
 }
 
+/**
+ * A response body as text in the charset it declares: the Content-Type header first, then an XML declaration
+ * (Folha's feeds are ISO-8859-1 and say so only in <?xml … encoding?>). Anything else is read as UTF-8.
+ */
+export function decodeBody(bytes: Uint8Array, contentType: string | null): string {
+  const declared =
+    contentType?.match(/charset="?([\w-]+)/i)?.[1] ??
+    new TextDecoder("latin1").decode(bytes.subarray(0, 200)).match(/^\s*<\?xml[^>]*encoding=["']([\w-]+)["']/i)?.[1];
+  try {
+    return new TextDecoder(declared ?? "utf-8").decode(bytes);
+  } catch {
+    return new TextDecoder("utf-8").decode(bytes); // a charset name TextDecoder does not know
+  }
+}
+
 interface CacheEntry { etag?: string; lastModified?: string; body: string; key: string }
 const cache = new Map<string, CacheEntry>();
 
@@ -51,7 +66,7 @@ export async function fetchConditional(
   const res = await fetch(url, { headers, signal: AbortSignal.timeout(timeoutMs) });
   if (res.status === 304 && prev) return { changed: false, body: prev.body };
   if (!res.ok) throw new Error(`HTTP ${res.status} em ${new URL(url).host}`);
-  const body = await res.text();
+  const body = decodeBody(new Uint8Array(await res.arrayBuffer()), res.headers.get("content-type"));
   const key = fingerprint(body);
   const changed = key !== prev?.key;
   cache.set(url, {

@@ -8,6 +8,12 @@ const EFFORTS: readonly Effort[] = ["low", "medium", "high", "xhigh", "max"];
 const URGENCIES: readonly Urgency[] = ["normal", "alta", "urgente"];
 const AV_USES = ["interno", "publico"] as const;
 const PARTNR_USES = ["interno", "publico"] as const;
+const DECIFRA_MODES = ["revisao", "automatica"] as const;
+/** Official sources by id prefix: bcb-copom, bcb-atas, bcb-notas, fed-*, ecb-press, ibge-releases, sidra-*, cvm-fatos. */
+export const DECIFRA_SOURCES = ["bcb", "fed", "ecb", "ibge", "sidra", "cvm"] as const;
+/** Press feeds on by default: outlets whose titles we show with credit and link (see src/sources/press.ts). */
+export const PRESS_DEFAULT = ["agenciabrasil", "infomoney", "poder360", "g1", "moneytimes"] as const;
+export const PRESS_ALL = [...PRESS_DEFAULT, "folha"] as const;
 /** Monetary, macro and fiscal news, plus US-listed Brazilian companies (ADRs and Nasdaq/NYSE listings). */
 const AV_DEFAULT_QUERIES = [
   "topics:economy_monetary", "topics:economy_macro", "topics:economy_fiscal",
@@ -76,7 +82,7 @@ function reader(env: Env, warn: (msg: string) => void) {
       const v = raw(name);
       if (v === undefined) return "";
       if (/^[\x21-\x7e]+$/.test(v)) return v;
-      warn(`config: ${name} inválida (espaço ou caractere de controle); a fonte fica desligada`);
+      warn(`config: ${name} inválida (espaço ou caractere de controle); valor ignorado`);
       return "";
     },
 
@@ -94,6 +100,7 @@ function reader(env: Env, warn: (msg: string) => void) {
 /** Reads and validates every setting. Pure apart from `warn`, so tests can pass any environment. */
 export function loadConfig(env: Env, warn: (msg: string) => void = (msg) => log.warn(msg)) {
   const r = reader(env, warn);
+  const aiKey = r.secret("PLATOMAI_ANTHROPIC_API_KEY");
   return {
     port: r.num("PORT", 8080, 1, 65535, true),
     host: r.str("HOST", "0.0.0.0"),
@@ -142,11 +149,32 @@ export function loadConfig(env: Env, warn: (msg: string) => void = (msg) => log.
       maxPerIp: r.num("SSE_MAX_PER_IP", 20, 0, 10000, true),
     },
     ai: {
+      /** The app's own key. Preferred over ANTHROPIC_API_KEY, which a development machine may set for other tools. */
+      apiKey: aiKey,
+      baseUrl: r.url("PLATOMAI_ANTHROPIC_URL", "https://api.anthropic.com"),
       // The SDK also accepts ANTHROPIC_AUTH_TOKEN or an `ant auth login` profile; AI_ENABLED=1 forces it on.
-      enabled: r.bool("AI_ENABLED", Boolean(env.ANTHROPIC_API_KEY?.trim() || env.ANTHROPIC_AUTH_TOKEN?.trim())),
+      enabled: r.bool("AI_ENABLED", Boolean(aiKey || env.ANTHROPIC_API_KEY?.trim() || env.ANTHROPIC_AUTH_TOKEN?.trim())),
       model: r.str("AI_MODEL", "claude-opus-5-5"),
       effort: r.oneOf("AI_EFFORT", EFFORTS, "low"),
       concurrency: r.num("AI_CONCURRENCY", 3, 1, 10, true),
+    },
+    /** "PlatomAI decifra": the analyst agent's short analysis of each live official headline. Needs the AI on. */
+    decifra: {
+      enabled: r.bool("DECIFRA", true),
+      /** revisao: every text waits for one click on /revisao. automatica: texts that pass every check go straight out. */
+      mode: r.oneOf("DECIFRA_PUBLICACAO", DECIFRA_MODES, "revisao"),
+      model: r.str("DECIFRA_MODELO", "claude-opus-5-5"),
+      effort: r.oneOf("DECIFRA_ESFORCO", EFFORTS, "medium"),
+      concurrency: r.num("DECIFRA_CONCORRENCIA", 2, 1, 5, true),
+      /** Which official sources get a decifra, by id or id prefix ("bcb", "fed", "bcb-copom", "cvm"…). */
+      sources: r.list("DECIFRA_FONTES", DECIFRA_SOURCES, (v) => /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(v), "use prefixos como bcb, fed, ecb, ibge, sidra, cvm"),
+      promptPath: r.str("DECIFRA_PROMPT", "editorial/agente-analise.md"),
+    },
+    /** Press feeds: the outlet's title, credit and link, never rewritten and never sent to the AI. */
+    press: {
+      outlets: r.list("IMPRENSA_FONTES", PRESS_DEFAULT, (v) => (PRESS_ALL as readonly string[]).includes(v) || v === "nenhuma", `use ${PRESS_ALL.join(", ")} ou nenhuma`)
+        .filter((v) => v !== "nenhuma"),
+      intervalMs: r.num("IMPRENSA_INTERVALO_S", 60, 30, 3600, true) * 1000,
     },
     social: {
       /** Lowest urgency that goes to social networks. */

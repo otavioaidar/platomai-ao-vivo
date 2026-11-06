@@ -2,13 +2,16 @@ import { createHash } from "node:crypto";
 import { setTimeout as sleep } from "node:timers/promises";
 import { errorText, log } from "./log.ts";
 import { meetsUrgency } from "./publishers/index.ts";
+import { sameStory } from "./sources/press.ts";
 import { fmtNum } from "./text.ts";
+import { publicHeadline } from "./view.ts";
 import { unsupportedNumbers } from "./writer/guard.ts";
 import { renderIndicator } from "./writer/templates.ts";
-import type { PendingJob, Store } from "./db.ts";
+import type { DecifraJob, PendingJob, Store } from "./db.ts";
 import type { Hub } from "./hub.ts";
 import type { Publisher } from "./publishers/index.ts";
 import type { Writer, WriterDraft } from "./writer/ai.ts";
+import type { Decifrador } from "./writer/decifra.ts";
 import type { Draft, Headline, IndicatorRelease, RawItem, Source, SourceStatus, Status, Urgency } from "./types.ts";
 
 export interface PipelineOptions {
@@ -20,6 +23,15 @@ export interface PipelineOptions {
   backfillPerSource: number;
   showReview: boolean;
   aiConcurrency: number;
+  /** "PlatomAI decifra" for live official headlines; absent when the AI or the decifra is off. */
+  decifra?: {
+    writer: Decifrador;
+    /** revisao: every text waits for approval; automatica: texts that pass every check are published at once. */
+    mode: "revisao" | "automatica";
+    concurrency: number;
+    /** Source ids or id prefixes that get a decifra ("bcb" covers bcb-copom); empty or absent: every official source. */
+    sources?: string[];
+  };
   /** Clock in epoch ms; tests pass a fake one. */
   now?: () => number;
 }
@@ -30,6 +42,11 @@ const STALE_MS = 6 * 3600 * 1000;
 const RETRY_BASE_MS = 15_000;
 const RETRY_MAX_MS = 30 * 60_000;
 const GIVE_UP_MS = 6 * 3600 * 1000;
+/** A decifra that fails (API error) is retried 1, 2, 4 and 8 min later, then dropped: the headline stands on its own. */
+const DECIFRA_RETRY_MS = 60_000;
+const DECIFRA_MAX_ATTEMPTS = 5;
+/** How often the analysis queue is checked for retries and for jobs left over from before a restart. */
+const DECIFRA_PUMP_MS = 30_000;
 
 export function rawKey(item: RawItem): string {
   return `${item.sourceId}:${item.externalId}`;
@@ -123,11 +140,16 @@ export class Pipeline {
   private readonly inflight = new Set<Promise<unknown>>();
   /** Queue keys being written right now, so an overlapping run never writes the same item twice. */
   private readonly busy = new Set<string>();
+  /** The analyst agent runs apart from the headline writer, so a slow analysis never holds up a headline. */
+  private readonly decifraLimiter: Limiter;
+  private readonly decifraBusy = new Set<string>();
+  private decifraTimer: NodeJS.Timeout | undefined;
 
   constructor(o: PipelineOptions) {
     this.o = o;
     this.now = o.now ?? Date.now;
     this.ai = new Limiter(o.aiConcurrency);
+    this.decifraLimiter = new Limiter(o.decifra?.concurrency ?? 1);
   }
 
   statuses(): SourceStatus[] {
@@ -141,7 +163,7 @@ export class Pipeline {
   }
 
   private async poll(src: Source): Promise<void> {
-    const st = this.status.get(src.id) ?? { id: src.id, name: src.name, lastOkAt: null, lastError: null };
+    const st = this.status.get(src.id) ?? { id: src.id, name: src.label ?? src.name, lastOkAt: null, lastError: null };
     this.status.set(src.id, st);
     const detectedAt = this.now();
     let items: RawItem[] | null = null;
@@ -233,6 +255,7 @@ export class Pipeline {
 
   private async process(src: Source, job: PendingJob): Promise<Headline | null> {
     const item = src.enrich ? await src.enrich(job.item) : job.item;
+    if (src.kind === "imprensa") return this.press(src, item, job);
     // Licensed for internal use only: keep it for the private review page, never public, and never sent to the AI.
     if (item.reviewOnly) return this.commit(job, { ...this.review(src, item, job, item.reviewOnly), internalOnly: true });
     if (item.data) {
@@ -242,7 +265,7 @@ export class Pipeline {
         this.o.store.finish(job.key, null);
         return null;
       }
-      const h = this.commit(job, this.build(src, item, job, draft));
+      const h = this.commit(job, this.build(src, item, job, draft), { src, item });
       this.explain(h, item, item.data);
       return h;
     }
@@ -257,6 +280,30 @@ export class Pipeline {
       this.o.store.finish(job.key, null);
       return null;
     }
+    return this.commit(job, this.build(src, item, job, draft), { src, item });
+  }
+
+  /**
+   * A press title: shown as the outlet wrote it, with credit and link, and never sent to the AI. The same story
+   * from another outlet in the last hours is shown once.
+   */
+  private press(src: Source, item: RawItem, job: PendingJob): Headline | null {
+    const since = new Date(this.now() - STALE_MS).toISOString();
+    const twin = this.o.store.recentByTag(src.tag, since, 300).find((h) => sameStory(h.headline, item.title));
+    if (twin) {
+      log.info(`imprensa repetida (${src.name}): ${item.title}`, { igual: `${twin.sourceName}: ${twin.headline}` });
+      this.o.store.finish(job.key, null);
+      return null;
+    }
+    const draft: Draft = {
+      publish: true,
+      urgency: "normal",
+      headline: item.title,
+      explainer: null,
+      topics: [],
+      reason: "título do veículo, com crédito e link",
+      method: "titulo",
+    };
     return this.commit(job, this.build(src, item, job, draft));
   }
 
@@ -318,18 +365,103 @@ export class Pipeline {
     return { ...this.build(src, item, job, draft), status: "revisar", reviewReason: reason };
   }
 
-  /** Saves the headline and clears its queue entry in one transaction, then sends it to the site and social networks. */
-  private commit(job: PendingJob, h: Headline): Headline {
-    this.o.store.finish(job.key, h);
-    if (h.status === "publicado" || (this.o.showReview && !h.internalOnly)) this.o.hub.send("headline", h);
+  /** Whether a headline gets a "PlatomAI decifra": live, published, from an official source, with the AI on. */
+  private wantsDecifra(src: Source, h: Headline): boolean {
+    const d = this.o.decifra;
+    if (!d || src.kind !== "oficial" || h.status !== "publicado" || h.backfill || h.internalOnly || h.method === "rascunho") return false;
+    return !d.sources?.length || d.sources.some((p) => src.id === p || src.id.startsWith(`${p}-`));
+  }
+
+  /**
+   * Saves the headline and clears its queue entry in one transaction (queuing its decifra, when it gets one), then
+   * sends it to the site and social networks.
+   */
+  private commit(job: PendingJob, h: Headline, from?: { src: Source; item: RawItem }): Headline {
+    const decifra = from && this.wantsDecifra(from.src, h) ? { sourceName: from.src.name, item: from.item, at: this.now() } : undefined;
+    this.o.store.finish(job.key, h, decifra);
+    if (h.status === "publicado" || (this.o.showReview && !h.internalOnly)) this.o.hub.send("headline", publicHeadline(h));
     log.info(`${h.status} [${h.tag}] ${h.headline}`, { ms: h.latencyMs, metodo: h.method, ...(h.reviewReason ? { reviewReason: h.reviewReason } : {}) });
 
-    if (!h.backfill && h.status === "publicado" && h.method !== "rascunho" && meetsUrgency(h, this.o.minUrgency)) {
+    // Press titles are the outlet's work: shown on the site with credit, never pushed to social networks.
+    if (!h.backfill && h.status === "publicado" && h.method !== "rascunho" && h.method !== "titulo" && meetsUrgency(h, this.o.minUrgency)) {
       for (const p of this.o.publishers) {
         void this.track(p.publish(h).catch((err) => log.error(`envio ${p.name} falhou`, err)));
       }
     }
+    if (decifra) this.pumpDecifra();
     return h;
+  }
+
+  /** Starts every analysis that is due (new ones, retries and leftovers from before a restart), in the background. */
+  private pumpDecifra(): void {
+    if (!this.o.decifra || this.abort.signal.aborted) return;
+    let due: DecifraJob[];
+    try {
+      due = this.o.store.dueDecifra(this.now());
+    } catch (err) {
+      log.warn("fila do decifra indisponível", err);
+      return;
+    }
+    for (const job of due) {
+      if (this.decifraBusy.has(job.headlineId)) continue;
+      this.decifraBusy.add(job.headlineId);
+      const run = this.decifraLimiter
+        .run(() => this.runDecifra(job))
+        .catch((err) => log.error(`decifra de ${job.headlineId} falhou`, err))
+        .finally(() => this.decifraBusy.delete(job.headlineId));
+      void this.track(run);
+    }
+  }
+
+  /** One analysis attempt. An API error is retried with backoff; every other outcome is final. */
+  private async runDecifra(job: DecifraJob): Promise<void> {
+    const d = this.o.decifra;
+    if (!d || this.abort.signal.aborted) return; // shutting down: it stays queued for the next start
+    const id = job.headlineId;
+    const h = this.o.store.get(id);
+    if (!h || h.status !== "publicado" || h.decifra) {
+      this.o.store.finishDecifra(id);
+      return;
+    }
+    let out;
+    try {
+      out = await d.writer.decifra({ headline: h, item: job.item, sourceName: job.sourceName });
+    } catch (err) {
+      const attempts = job.attempts + 1;
+      if (attempts >= DECIFRA_MAX_ATTEMPTS) {
+        log.error(`decifra de ${id}: desistindo após ${attempts} tentativas`, err);
+        this.o.store.finishDecifra(id);
+      } else {
+        log.warn(`decifra de ${id} falhou (tentativa ${attempts})`, err);
+        this.o.store.retryDecifra(id, attempts, this.now() + DECIFRA_RETRY_MS * 2 ** (attempts - 1), errorText(err));
+      }
+      return;
+    }
+    const skip = (reason: string) => this.o.store.finishDecifra(id, (cur) => ({ ...cur, decifraSkipped: reason }));
+    if (!out) {
+      log.warn(`decifra de ${id}: a IA recusou o material`);
+      skip("a IA recusou o material");
+      return;
+    }
+    if (out.kind === "nao-vale") {
+      log.info(`decifra de ${id}: NÃO VALE TEXTO`, { motivo: out.reason });
+      skip(out.reason);
+      return;
+    }
+    if (out.kind === "invalido") {
+      log.warn(`decifra de ${id}: resposta fora do formato`, { problemas: out.problems });
+      skip(`resposta fora do formato: ${out.problems.join("; ")}`);
+      return;
+    }
+    const problems = out.problems;
+    const status = problems.length || d.mode === "revisao" ? "revisar" : "publicado";
+    const text = out.text;
+    const saved = this.o.store.finishDecifra(id, (cur) => ({
+      ...cur,
+      decifra: { ...text, status, createdAt: new Date(this.now()).toISOString(), ...(problems.length ? { checks: problems } : {}) },
+    }));
+    log.info(`decifra ${status} [${h.tag}] ${text.title}`, problems.length ? { checagem: problems } : {});
+    if (saved && status === "publicado") this.o.hub.send("update", publicHeadline(saved));
   }
 
   /** Adds a "PlatomAI explica" line to a template headline in the background, if every number checks out. */
@@ -340,9 +472,9 @@ export class Pipeline {
       .run(() => this.o.writer.explain(h, item))
       .then((text) => {
         if (!text || unsupportedNumbers(text, source, "pt").length) return;
-        const updated = { ...h, explainer: text };
-        this.o.store.save(updated);
-        this.o.hub.send("update", updated);
+        // Merged into the stored copy: the decifra may have been added in the meantime.
+        const updated = this.o.store.update(h.id, (cur) => ({ ...cur, explainer: text }));
+        if (updated) this.o.hub.send("update", publicHeadline(updated));
       })
       .catch((err) => log.warn(`explicação de ${h.id} falhou`, err));
     void this.track(job);
@@ -358,6 +490,11 @@ export class Pipeline {
   /** Starts one polling loop per source. Each loop waits for its poll to finish before sleeping. */
   start(sources: Source[]): void {
     for (const src of sources) this.loops.push(this.loop(src));
+    if (this.o.decifra) {
+      this.pumpDecifra(); // picks up analyses left over from before a restart
+      this.decifraTimer = setInterval(() => this.pumpDecifra(), DECIFRA_PUMP_MS);
+      this.decifraTimer.unref();
+    }
   }
 
   private async loop(src: Source): Promise<void> {
@@ -389,6 +526,7 @@ export class Pipeline {
 
   stop(): void {
     this.abort.abort();
+    clearInterval(this.decifraTimer);
   }
 
   /** After stop(): waits for the loops and every write or post in flight, up to `timeoutMs`. True if all finished. */

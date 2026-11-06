@@ -22,7 +22,7 @@
 
 <main class="wrap">
   <h1>Fila de revisão</h1>
-  <p class="lead">O que não foi para o site: manchetes que falharam na checagem, itens que a IA recusou e fontes de uso interno (como a Alpha Vantage e a Partnr, até a licença comercial). Esta página não é indexada e só mostra dados com o token.</p>
+  <p class="lead">O que ainda não foi para o site: os textos do PlatomAI decifra esperando aprovação, manchetes que falharam na checagem, itens que a IA recusou e fontes de uso interno (como a Alpha Vantage e a Partnr, até a licença comercial). Esta página não é indexada e só mostra dados com o token.</p>
 
   <form id="login" class="login" hidden>
     <label for="token">Token de acesso</label>
@@ -36,6 +36,7 @@
     <label for="filter">Mostrar</label>
     <select id="filter">
       <option value="todos">Tudo</option>
+      <option value="decifra">Só PlatomAI decifra</option>
       <option value="interno">Só fontes de uso interno</option>
       <option value="checagem">Só checagem e recusas</option>
     </select>
@@ -45,6 +46,17 @@
   </div>
 
   <p id="msg" class="msg" role="status"></p>
+
+  <section id="dec-box" class="dec-box" hidden>
+    <h2>PlatomAI decifra para aprovar</h2>
+    <p class="hint">Cada texto só aparece no site depois de “Aprovar e publicar”. A checagem automática (tetos de palavras, números da fonte, trechos copiados, expressões vetadas, recomendação) aparece em vermelho quando encontrou algo.</p>
+    <ol id="dec-list" class="list"></ol>
+    <details id="skip-box" class="skip-box" hidden>
+      <summary id="skip-sum">Não vale texto</summary>
+      <ol id="skip-list" class="list"></ol>
+    </details>
+  </section>
+
   <ol id="list" class="list"></ol>
 </main>
 </body>

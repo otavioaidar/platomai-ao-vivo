@@ -181,6 +181,7 @@ export function cvmSource(o: CvmOptions): Source {
     name: "CVM (fatos relevantes)",
     tag: "CVM",
     region: "BR",
+    kind: "oficial",
     intervalMs: o.intervalMs,
     hotIntervalMs: (now) => (inFilingWindow(now) ? Math.min(o.hotIntervalMs ?? 10_000, o.intervalMs) : null),
     async poll() {

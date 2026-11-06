@@ -435,7 +435,8 @@ button, input { font: inherit; color: inherit; }
   grid-template-columns: 74px 76px minmax(0, 1fr) auto;
   grid-template-areas:
     "time tag text src"
-    ".    .   expl expl";
+    ".    .   expl expl"
+    ".    .   dec  dec";
   column-gap: 12px;
   align-items: baseline;
   padding: 10px var(--row-x);
@@ -541,6 +542,71 @@ button, input { font: inherit; color: inherit; }
   overflow-wrap: anywhere;
 }
 .t-expl-lbl { color: var(--purple-text); font-weight: 600; }
+
+/* Press titles: the outlet's credit */
+.t-credit { color: var(--muted); font-size: 13px; white-space: nowrap; }
+
+/* "PlatomAI decifra" card */
+.t-dec {
+  grid-area: dec;
+  margin: 8px 0 2px;
+  border: 1px solid var(--purple-border);
+  border-radius: 8px;
+  background: var(--purple-tint);
+}
+.dec-sum {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 13.5px;
+  line-height: 1.45;
+  list-style: none;
+}
+.dec-sum::-webkit-details-marker { display: none; }
+.dec-sum::before {
+  content: "▸";
+  color: var(--purple-text);
+  transition: transform 0.15s ease-out;
+}
+.t-dec[open] > .dec-sum::before { transform: rotate(90deg); }
+.dec-sum:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 8px; }
+.dec-lbl {
+  color: var(--purple-text);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.dec-title { font-family: var(--font-disp); font-weight: 700; color: var(--text); }
+.dec-body {
+  padding: 0 14px 12px 30px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text-2);
+}
+.dec-body p { margin: 0 0 8px; }
+.dec-sub { color: var(--text); }
+.dec-date { color: var(--muted); font-size: 12.5px; }
+.dec-sec { margin-top: 12px; }
+.dec-h {
+  margin: 0 0 4px;
+  font-family: var(--font-disp);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--purple-text);
+}
+.dec-image { font-family: var(--font-disp); font-weight: 600; color: var(--text); }
+.dec-list { margin: 0; padding-left: 18px; }
+.dec-list li { margin: 0 0 4px; }
+.dec-list strong { color: var(--text); font-weight: 600; }
+.dec-body .dec-sign { margin-top: 12px; font-size: 12.5px; color: var(--purple-text); font-weight: 600; }
+.dec-note { font-size: 12px; color: var(--muted); }
+.t-dec.is-fresh { animation: arrive 0.42s cubic-bezier(.2, .7, .3, 1); }
 
 /* New headline arriving */
 .row.is-new { animation: arrive 0.42s cubic-bezier(.2, .7, .3, 1), flash 4.5s ease-out; }
@@ -779,7 +845,8 @@ button, input { font: inherit; color: inherit; }
     grid-template-areas:
       "time tag . src"
       "text text text text"
-      "expl expl expl expl";
+      "expl expl expl expl"
+      "dec  dec  dec  dec";
     column-gap: 8px;
     padding-top: 11px;
     padding-bottom: 12px;

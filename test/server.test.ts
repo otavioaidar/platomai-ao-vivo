@@ -338,3 +338,56 @@ test("bearerOk compares the whole token", async () => {
   assert.equal(bearerOk(undefined, "abc"), false);
   assert.equal(bearerOk("Bearer ", ""), false);
 });
+
+test("a decifra is approved or turned down with the token, once, and only then reaches the public", async () => {
+  const text = {
+    title: "Copom mantém 13,75%", subtitle: "Juro segue alto.", date: "4 de novembro de 2026", summary: "Segundo o BC, a Selic ficou em 13,75%.",
+    analysis: ["Um parágrafo.", "Frase-imagem."], impact: [{ label: "Juros", text: "menos espaço para cortes." }], keyMessage: "O dado a observar é o Focus.",
+  };
+  store.save({ ...headline("dec1"), decifra: { ...text, status: "revisar", createdAt: new Date().toISOString(), checks: ["nota interna"] } });
+  store.save({ ...headline("dec2"), decifra: { ...text, status: "revisar", createdAt: new Date().toISOString() } });
+  store.save({ ...headline("dec3"), decifraSkipped: "nota institucional" });
+  const pushed: { event: string; data: any }[] = [];
+  const liveHub = new Hub(60_000);
+  liveHub.send = (event, data) => void pushed.push({ event, data });
+  const on = await extraServer({ reviewToken: "segredo-longo", hub: liveHub });
+  const auth = { authorization: "Bearer segredo-longo" };
+  try {
+    const publicIds = async () => ((await (await fetch(`${on.url}/api/headlines`)).json()) as { items: Headline[] }).items;
+    let items = await publicIds();
+    assert.equal(items.find((h) => h.id === "dec1")?.decifra, undefined, "waiting for review: not public");
+    assert.equal(items.find((h) => h.id === "dec3")?.decifraSkipped, undefined);
+
+    const queue = (await (await fetch(`${on.url}/api/revisao`, { headers: auth })).json()) as { decifras: Headline[] };
+    assert.deepEqual(queue.decifras.map((h) => h.id).filter((id) => id.startsWith("dec")).sort(), ["dec1", "dec2", "dec3"]);
+
+    assert.equal((await fetch(`${on.url}/api/revisao/decifra/dec1/aprovar`, { method: "POST" })).status, 401);
+    assert.equal((await fetch(`${on.url}/api/revisao/decifra/dec1/aprovar`, { headers: auth })).status, 405);
+    assert.equal((await fetch(`${on.url}/api/revisao/decifra/nada/aprovar`, { method: "POST", headers: auth })).status, 404);
+
+    const ok = await fetch(`${on.url}/api/revisao/decifra/dec1/aprovar`, { method: "POST", headers: auth });
+    assert.equal(ok.status, 200);
+    assert.deepEqual(await ok.json(), { ok: true, status: "publicado" });
+    assert.equal((await fetch(`${on.url}/api/revisao/decifra/dec1/descartar`, { method: "POST", headers: auth })).status, 409, "a second click changes nothing");
+    assert.equal(pushed.length, 1);
+    assert.equal(pushed[0].event, "update");
+    assert.equal(pushed[0].data.decifra.title, "Copom mantém 13,75%");
+    assert.equal(pushed[0].data.decifra.checks, undefined, "check notes stay internal");
+
+    assert.equal((await fetch(`${on.url}/api/revisao/decifra/dec2/descartar`, { method: "POST", headers: auth })).status, 200);
+    assert.equal(store.get("dec2")?.decifra?.status, "descartado");
+    assert.equal(pushed.length, 1, "a discarded text is never pushed");
+
+    items = await publicIds();
+    assert.equal(items.find((h) => h.id === "dec1")?.decifra?.status, "publicado");
+    assert.equal(items.find((h) => h.id === "dec2")?.decifra, undefined);
+  } finally {
+    on.close();
+  }
+  const off = await extraServer({});
+  try {
+    assert.equal((await fetch(`${off.url}/api/revisao/decifra/dec2/aprovar`, { method: "POST" })).status, 404, "no token configured: no review API");
+  } finally {
+    off.close();
+  }
+});

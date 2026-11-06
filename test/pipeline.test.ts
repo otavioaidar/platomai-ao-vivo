@@ -603,3 +603,217 @@ test("a first successful poll that comes back empty counts as first contact: lat
   assert.equal(pub.sent.length, 1, "it went to the social networks like any live headline");
   hub.close();
 });
+
+// ---------------------------------------------------------------------------------------------
+// Press titles and "PlatomAI decifra"
+
+import type { DecifraInput, DecifraOutcome, Decifrador } from "../src/writer/decifra.ts";
+import type { DecifraText } from "../src/types.ts";
+
+const TEXT: DecifraText = {
+  title: "Copom mantém 13,75% e põe expectativas no centro do risco",
+  subtitle: "Para quem toma crédito, o juro segue alto.",
+  date: "4 de novembro de 2026",
+  summary: "Segundo o BC, o Copom manteve a Selic em 13,75%.",
+  analysis: ["A tabela do BC põe a inflação acima do Focus.", "A Selic não saiu do lugar; a meta ficou mais longe."],
+  impact: [{ label: "Juros", text: "menos espaço para cortes." }],
+  keyMessage: "O dado a observar é o Focus.",
+};
+
+class FakeDecifrador implements Decifrador {
+  readonly model = "fake";
+  calls: DecifraInput[] = [];
+  failures = 0;
+  outcome: DecifraOutcome | null = { kind: "texto", text: TEXT, problems: [] };
+  async decifra(input: DecifraInput): Promise<DecifraOutcome | null> {
+    this.calls.push(input);
+    if (this.failures > 0) {
+      this.failures--;
+      throw new Error("API fora do ar");
+    }
+    return this.outcome;
+  }
+}
+
+function setupDecifra(
+  mode: "revisao" | "automatica",
+  kind: Source["kind"] = "oficial",
+  batches: RawItem[][] = [[], [item("1", "Copom mantém Selic em 13,75%")]],
+  sources?: string[],
+) {
+  const store = new Store(":memory:");
+  const hub = new Hub(60_000);
+  const writer = new FakeWriter();
+  const pub = new FakePublisher();
+  const decifrador = new FakeDecifrador();
+  const sent: { event: string; data: any }[] = [];
+  hub.send = (event, data) => void sent.push({ event, data });
+  const clock = { t: Date.now() };
+  const p = new Pipeline({
+    store, writer, hub, publishers: [pub], minUrgency: "alta", backfillPerSource: 2, showReview: false, aiConcurrency: 2,
+    decifra: { writer: decifrador, mode, concurrency: 1, sources }, now: () => clock.t,
+  });
+  const src = { ...fakeSource(batches), kind };
+  return { store, writer, pub, decifrador, sent, p, clock, src };
+}
+
+test("a live official headline gets a decifra that waits for review, unseen by the public", async () => {
+  const s = setupDecifra("revisao");
+  await s.p.runOnce(s.src); // first contact: empty
+  const [h] = await s.p.runOnce(s.src);
+  await s.p.drain(2000);
+  assert.equal(s.decifrador.calls.length, 1);
+  assert.equal(s.decifrador.calls[0].item.body, "Copom mantém Selic em 13,75%");
+  assert.equal(s.decifrador.calls[0].sourceName, "Fonte de teste");
+  const saved = s.store.get(h.id)!;
+  assert.equal(saved.decifra?.status, "revisar");
+  assert.equal(saved.decifra?.title, TEXT.title);
+  assert.equal(s.store.decifraPendingCount(), 0);
+  assert.deepEqual(s.store.decifraQueue(10).map((x) => x.id), [h.id]);
+  assert.ok(!s.sent.some((e) => e.event === "update"), "nothing goes to open pages before approval");
+  assert.ok(s.sent.every((e) => e.data.decifra === undefined));
+});
+
+test("in automatic mode a clean decifra is published at once and pushed to open pages; one with problems still waits", async () => {
+  const s = setupDecifra("automatica");
+  await s.p.runOnce(s.src);
+  const [h] = await s.p.runOnce(s.src);
+  await s.p.drain(2000);
+  assert.equal(s.store.get(h.id)?.decifra?.status, "publicado");
+  const update = s.sent.find((e) => e.event === "update");
+  assert.equal(update?.data.decifra.title, TEXT.title);
+
+  const t = setupDecifra("automatica");
+  t.decifrador.outcome = { kind: "texto", text: TEXT, problems: ["números sem respaldo na fonte: 13,50"] };
+  await t.p.runOnce(t.src);
+  const [h2] = await t.p.runOnce(t.src);
+  await t.p.drain(2000);
+  const d = t.store.get(h2.id)?.decifra;
+  assert.equal(d?.status, "revisar");
+  assert.deepEqual(d?.checks, ["números sem respaldo na fonte: 13,50"]);
+  assert.ok(!t.sent.some((e) => e.event === "update"));
+});
+
+test("NÃO VALE TEXTO is recorded for the review page only", async () => {
+  const s = setupDecifra("automatica");
+  s.decifrador.outcome = { kind: "nao-vale", reason: "nota institucional" };
+  await s.p.runOnce(s.src);
+  const [h] = await s.p.runOnce(s.src);
+  await s.p.drain(2000);
+  const saved = s.store.get(h.id)!;
+  assert.equal(saved.decifra, undefined);
+  assert.equal(saved.decifraSkipped, "nota institucional");
+  assert.equal(s.store.decifraPendingCount(), 0);
+});
+
+test("a decifra that fails is retried later from the queue, and the headline is out in the meantime", async () => {
+  const s = setupDecifra("automatica");
+  s.decifrador.failures = 1;
+  await s.p.runOnce(s.src);
+  const [h] = await s.p.runOnce(s.src);
+  await s.p.drain(2000);
+  assert.equal(h.status, "publicado");
+  assert.equal(s.store.decifraPendingCount(), 1);
+  assert.equal(s.store.dueDecifra(s.clock.t).length, 0, "not due again right away");
+  s.clock.t += 61_000;
+  const [job] = s.store.dueDecifra(s.clock.t);
+  assert.equal(job.attempts, 1);
+  (s.p as unknown as { pumpDecifra(): void }).pumpDecifra();
+  await s.p.drain(2000);
+  assert.equal(s.store.get(h.id)?.decifra?.status, "publicado");
+  assert.equal(s.store.decifraPendingCount(), 0);
+});
+
+test("history, review copies and non-official sources get no decifra", async () => {
+  // First contact: the items are history.
+  const s = setupDecifra("automatica", "oficial", [[item("1", "Copom mantém Selic em 13,75%")]]);
+  await s.p.runOnce(s.src);
+  await s.p.drain(2000);
+  assert.equal(s.decifrador.calls.length, 0);
+
+  // A licensed (non-official) source.
+  const l = setupDecifra("automatica");
+  const licensed = { ...l.src, kind: undefined };
+  await l.p.runOnce(licensed);
+  await l.p.runOnce(licensed);
+  await l.p.drain(2000);
+  assert.equal(l.decifrador.calls.length, 0);
+
+  // A headline that failed its check.
+  const r = setupDecifra("automatica");
+  r.writer.draft = () => ({ publish: true, urgency: "urgente", headline: "Copom mantém Selic em 13,50%", explainer: null, topics: [], reason: "", method: "ia" });
+  await r.p.runOnce(r.src);
+  await r.p.runOnce(r.src);
+  await r.p.drain(2000);
+  assert.equal(r.decifrador.calls.length, 0);
+});
+
+test("a decifra queued before a restart is written by the next process", async (t) => {
+  const file = tmpDb(t);
+  const first = new Store(file);
+  first.save({ id: "h1", status: "publicado", publishedAt: new Date().toISOString(), headline: "Fed mantém juros", tag: "FED" } as Headline);
+  first.db.prepare("INSERT INTO decifra_pending (headline_id, source_name, item_json, attempts, next_attempt_at, created_at) VALUES ('h1', 'Fed', ?, 0, 0, 0)").run(JSON.stringify(item("1", "Fed")));
+  first.close();
+  const store = new Store(file);
+  const decifrador = new FakeDecifrador();
+  const p = new Pipeline({
+    store, writer: new FakeWriter(), hub: new Hub(60_000), publishers: [], minUrgency: "alta", backfillPerSource: 2, showReview: false,
+    aiConcurrency: 1, decifra: { writer: decifrador, mode: "revisao", concurrency: 1 },
+  });
+  p.start([]);
+  p.stop();
+  await p.drain(2000);
+  // start() picks it up at once; stop() lets the job in flight finish.
+  assert.equal(decifrador.calls.length, 1);
+  assert.equal(store.get("h1")?.decifra?.status, "revisar");
+  store.close();
+});
+
+test("the explainer and the decifra both land when they finish in any order", async () => {
+  const s = setupDecifra("automatica");
+  await s.p.runOnce(s.src);
+  const [h] = await s.p.runOnce(s.src);
+  await s.p.drain(2000);
+  // An explainer arriving after the decifra must not drop it (read-modify-write).
+  s.store.update(h.id, (cur) => ({ ...cur, explainer: "Juro alto encarece o crédito." }));
+  const saved = s.store.get(h.id)!;
+  assert.equal(saved.explainer, "Juro alto encarece o crédito.");
+  assert.equal(saved.decifra?.status, "publicado");
+});
+
+test("a press title is shown as the outlet wrote it, with no AI and no social post, and once per story", async () => {
+  const story = (id: string, title: string) => ({ ...item(id, title), body: "" });
+  const s = setupDecifra("automatica", "imprensa", [[], [story("1", "Governo prorroga imposto de 12% sobre exportação de petróleo até dezembro")]]);
+  await s.p.runOnce(s.src);
+  const [h] = await s.p.runOnce(s.src);
+  await s.p.drain(2000);
+  assert.equal(h.method, "titulo");
+  assert.equal(h.headline, "Governo prorroga imposto de 12% sobre exportação de petróleo até dezembro");
+  assert.equal(h.status, "publicado");
+  assert.equal(h.explainer, null);
+  assert.equal(s.writer.calls, 0, "never sent to the AI");
+  assert.equal(s.decifrador.calls.length, 0);
+  assert.equal(s.pub.sent.length, 0, "never pushed to social networks");
+
+  // The same story from a second outlet is dropped.
+  const other = { ...fakeSource([[], [story("2", "Governo Lula prorroga até dezembro imposto de 12% sobre exportação de petróleo")]]), id: "outro", name: "Outro", kind: "imprensa" as const, tag: "BCB" };
+  const store = s.store;
+  await s.p.runOnce(other);
+  const out = await s.p.runOnce(other);
+  assert.deepEqual(out, []);
+  assert.equal(store.latest(10).length, 1);
+});
+
+test("DECIFRA_FONTES limits the decifra to the sources listed, by id or id prefix", async () => {
+  const off = setupDecifra("automatica", "oficial", undefined, ["cvm", "bcb-copom"]);
+  await off.p.runOnce(off.src); // id "fake": not listed
+  await off.p.runOnce(off.src);
+  await off.p.drain(2000);
+  assert.equal(off.decifrador.calls.length, 0);
+
+  const on = setupDecifra("automatica", "oficial", undefined, ["fake"]);
+  await on.p.runOnce(on.src);
+  await on.p.runOnce(on.src);
+  await on.p.drain(2000);
+  assert.equal(on.decifrador.calls.length, 1);
+});

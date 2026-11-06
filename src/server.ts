@@ -4,10 +4,11 @@ import http from "node:http";
 import path from "node:path";
 import { log } from "./log.ts";
 import { escapeHtml } from "./text.ts";
+import { publicHeadline } from "./view.ts";
 import type { Store } from "./db.ts";
 import type { Hub } from "./hub.ts";
 import type { Agenda } from "./sources/ibge.ts";
-import type { SourceStatus } from "./types.ts";
+import type { Headline, SourceStatus } from "./types.ts";
 
 export interface ServerDeps {
   store: Store;
@@ -20,6 +21,7 @@ export interface ServerDeps {
   statuses: () => SourceStatus[];
   /** Bearer token for the private review queue (/api/revisao). Empty: the queue is not served at all. */
   reviewToken?: string;
+  decifra?: { enabled: boolean; mode: string };
 }
 
 /** Constant-time check of "Authorization: Bearer <token>" (both sides hashed, so lengths never leak). */
@@ -122,17 +124,60 @@ function serveStatic(deps: ServerDeps, urlPath: string, res: http.ServerResponse
   });
 }
 
+/** The review API answers only with the token; without one configured it does not exist at all. */
+function reviewAllowed(deps: ServerDeps, req: http.IncomingMessage, res: http.ServerResponse): boolean {
+  if (!deps.reviewToken) {
+    res.writeHead(404, { "content-type": "text/plain; charset=utf-8" }).end("Não encontrado");
+    return false;
+  }
+  if (!bearerOk(req.headers.authorization, deps.reviewToken)) {
+    res.writeHead(401, { "www-authenticate": "Bearer", "cache-control": "no-store" }).end();
+    return false;
+  }
+  return true;
+}
+
+const DECIFRA_ACTION = /^\/api\/revisao\/decifra\/([A-Za-z0-9_-]{1,80})\/(aprovar|descartar)$/;
+
+/**
+ * POST /api/revisao/decifra/<id>/aprovar publishes a decifra waiting for review (and pushes it to open pages);
+ * /descartar turns it down. Only a text still waiting can change: a second click answers 409.
+ */
+function decifraAction(deps: ServerDeps, req: http.IncomingMessage, res: http.ServerResponse, id: string, action: string) {
+  if (!reviewAllowed(deps, req, res)) return;
+  const when = new Date().toISOString();
+  let found = false;
+  const saved = deps.store.update(id, (h): Headline | null => {
+    found = true;
+    if (h.decifra?.status !== "revisar") return null;
+    return { ...h, decifra: { ...h.decifra, status: action === "aprovar" ? "publicado" : "descartado", reviewedAt: when } };
+  });
+  if (!found) return json(res, { error: "manchete não encontrada" }, 404);
+  if (!saved) return json(res, { error: "este decifra não está mais esperando revisão" }, 409);
+  log.info(`decifra ${action === "aprovar" ? "aprovado" : "descartado"} na revisão`, { id });
+  if (saved.decifra?.status === "publicado" && saved.status === "publicado") deps.hub.send("update", publicHeadline(saved));
+  return json(res, { ok: true, status: saved.decifra?.status });
+}
+
 function route(deps: ServerDeps, req: http.IncomingMessage, res: http.ServerResponse) {
+  const url = URL.parse(req.url ?? "/", "http://localhost");
+  if (!url) return badRequest(res);
+  const action = url.pathname.match(DECIFRA_ACTION);
+  if (action) {
+    if (req.method !== "POST") {
+      res.writeHead(405, { allow: "POST" }).end();
+      return;
+    }
+    return decifraAction(deps, req, res, action[1], action[2]);
+  }
   if (req.method !== "GET" && req.method !== "HEAD") {
     res.writeHead(405, { allow: "GET, HEAD" }).end();
     return;
   }
-  const url = URL.parse(req.url ?? "/", "http://localhost");
-  if (!url) return badRequest(res);
   switch (url.pathname) {
     case "/api/headlines": {
       const limit = Math.min(500, Math.max(1, Number(url.searchParams.get("limit") ?? 150) || 150));
-      return json(res, { items: deps.store.latest(limit, deps.showReview) });
+      return json(res, { items: deps.store.latest(limit, deps.showReview).map(publicHeadline) });
     }
     case "/api/stream":
       return deps.hub.attach(req, res);
@@ -141,6 +186,7 @@ function route(deps: ServerDeps, req: http.IncomingMessage, res: http.ServerResp
     case "/api/status":
       return json(res, {
         ai: deps.ai,
+        decifra: deps.decifra ?? { enabled: false, mode: "revisao" },
         listeners: deps.hub.size,
         sources: [
           ...deps.statuses(),
@@ -157,16 +203,9 @@ function route(deps: ServerDeps, req: http.IncomingMessage, res: http.ServerResp
     case "/revisao":
       return serveStatic(deps, "/revisao.html", res);
     case "/api/revisao": {
-      if (!deps.reviewToken) {
-        res.writeHead(404, { "content-type": "text/plain; charset=utf-8" }).end("Não encontrado");
-        return;
-      }
-      if (!bearerOk(req.headers.authorization, deps.reviewToken)) {
-        res.writeHead(401, { "www-authenticate": "Bearer", "cache-control": "no-store" }).end();
-        return;
-      }
+      if (!reviewAllowed(deps, req, res)) return;
       const limit = Math.min(500, Math.max(1, Number(url.searchParams.get("limit") ?? 200) || 200));
-      return json(res, { items: deps.store.reviewQueue(limit) });
+      return json(res, { items: deps.store.reviewQueue(limit), decifras: deps.store.decifraQueue(100) });
     }
     default:
       return serveStatic(deps, url.pathname, res);

@@ -10,8 +10,10 @@ import { officialFeeds } from "./sources/feeds.ts";
 import { alphaVantageSource, parseQuery } from "./sources/alphavantage.ts";
 import { cvmSource } from "./sources/cvm.ts";
 import { partnrSource } from "./sources/partnr.ts";
+import { pressFeeds } from "./sources/press.ts";
 import { Agenda, SIDRA_SPECS, ibgeReleases, sidraSource } from "./sources/ibge.ts";
-import { ClaudeWriter, DraftWriter } from "./writer/ai.ts";
+import { ClaudeWriter, DraftWriter, anthropicClient } from "./writer/ai.ts";
+import { ClaudeDecifrador } from "./writer/decifra.ts";
 import type { Writer } from "./writer/ai.ts";
 
 /** The IBGE calendar is retried every 2 min until it first loads, then refreshed every 30 min. */
@@ -27,9 +29,30 @@ const store = new Store(config.dbPath);
 const hub = new Hub(undefined, config.sse);
 const agenda = new Agenda();
 
-const writer: Writer = config.ai.enabled
-  ? new ClaudeWriter({ model: config.ai.model, effort: config.ai.effort, editorialPath: config.editorialPath })
+const ai = config.ai;
+const writer: Writer = ai.enabled
+  ? new ClaudeWriter({
+      model: ai.model,
+      effort: ai.effort,
+      editorialPath: config.editorialPath,
+      client: anthropicClient({ apiKey: ai.apiKey, baseUrl: ai.baseUrl }),
+    })
   : new DraftWriter();
+const dc = config.decifra;
+const decifra = ai.enabled && dc.enabled
+  ? {
+      writer: new ClaudeDecifrador({
+        model: dc.model,
+        effort: dc.effort,
+        promptPath: dc.promptPath,
+        // The agent thinks before it writes: a call takes from 30 s to a few minutes.
+        client: anthropicClient({ apiKey: ai.apiKey, baseUrl: ai.baseUrl, timeoutMs: 300_000 }),
+      }),
+      mode: dc.mode,
+      concurrency: dc.concurrency,
+      sources: dc.sources,
+    }
+  : undefined;
 const publishers = buildPublishers(config);
 
 const av = config.alphaVantage;
@@ -44,6 +67,7 @@ const sources = [
     : []),
   ...(config.cvm.enabled ? [cvmSource({ intervalMs: config.cvm.intervalMs })] : []),
   ...(pn.apiKey ? [partnrSource(pn)] : []),
+  ...pressFeeds(config.press.outlets, config.press.intervalMs, config.pollScale),
 ];
 
 const pipeline = new Pipeline({
@@ -55,6 +79,7 @@ const pipeline = new Pipeline({
   backfillPerSource: config.backfillPerSource,
   showReview: config.showReview,
   aiConcurrency: config.ai.concurrency,
+  decifra,
 });
 
 const server = createServer({
@@ -67,6 +92,7 @@ const server = createServer({
   ai: { enabled: writer.enabled, model: writer.model },
   statuses: () => pipeline.statuses(),
   reviewToken: config.reviewToken,
+  decifra: { enabled: Boolean(decifra), mode: dc.mode },
 });
 
 // The calendar loads in the background: a slow IBGE must not hold up the site or the other sources.
@@ -88,6 +114,8 @@ server.on("error", (err) => {
 server.listen(config.port, config.host, () => {
   log.info(`PlatomAI Ao Vivo em http://localhost:${config.port}`, {
     ia: writer.enabled ? `${writer.model} (esforço ${config.ai.effort})` : "desligada (rascunhos)",
+    decifra: decifra ? `${dc.model} (esforço ${dc.effort}, publicação ${dc.mode}, fontes ${dc.sources.join(",")})` : ai.enabled ? "desligado" : "desligado (sem IA)",
+    imprensa: config.press.outlets.length ? config.press.outlets.join(", ") : "desligada",
     fontes: sources.length,
     redes: publishers.map((p) => `${p.name}:${p.live ? "ao vivo" : "simulação"}`),
     alphaVantage: av.apiKey ? `${av.use} (${av.queries.length} consultas a cada ${av.intervalMs / 1000} s)` : "sem chave",

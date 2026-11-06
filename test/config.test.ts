@@ -154,3 +154,32 @@ test("CVM fatos relevantes are on by default, every 30 s, and can be turned off"
   assert.equal(loadConfig({ CVM_FATOS: "0" }, () => {}).cvm.enabled, false);
   assert.equal(loadConfig({ CVM_INTERVALO_S: "5" }, () => {}).cvm.intervalMs, 30_000, "below 10 s falls back to the default");
 });
+
+test("the app's own Anthropic key turns the AI on; decifra and press have safe defaults", () => {
+  const { config, warnings } = load({ PLATOMAI_ANTHROPIC_API_KEY: "sk-ant-teste" });
+  assert.equal(config.ai.enabled, true);
+  assert.equal(config.ai.apiKey, "sk-ant-teste");
+  assert.equal(config.ai.baseUrl, "https://api.anthropic.com");
+  assert.deepEqual(config.decifra, {
+    enabled: true, mode: "revisao", model: "claude-opus-5-5", effort: "medium", concurrency: 2, promptPath: "editorial/agente-analise.md",
+    sources: ["bcb", "fed", "ecb", "ibge", "sidra", "cvm"],
+  });
+  assert.deepEqual(config.press.outlets, ["agenciabrasil", "infomoney", "poder360", "g1", "moneytimes"]);
+  assert.equal(config.press.intervalMs, 60_000);
+  assert.deepEqual(warnings, []);
+});
+
+test("decifra and press settings are read and checked", () => {
+  const { config, warnings } = load({
+    DECIFRA_PUBLICACAO: "automatica", DECIFRA_ESFORCO: "high", IMPRENSA_FONTES: "g1, folha, valor", PLATOMAI_ANTHROPIC_API_KEY: "com espaço",
+  });
+  assert.equal(config.decifra.mode, "automatica");
+  assert.equal(config.decifra.effort, "high");
+  assert.deepEqual(config.press.outlets, ["g1", "folha"]);
+  assert.equal(config.ai.apiKey, "", "a key with a space is refused without echoing it");
+  assert.equal(config.ai.enabled, false, "and does not turn the AI on");
+  assert.ok(warnings.some((w) => w.includes('"valor"')));
+  assert.ok(!warnings.some((w) => w.includes("com espaço")));
+  assert.deepEqual(load({ IMPRENSA_FONTES: "nenhuma" }).config.press.outlets, []);
+  assert.deepEqual(load({ DECIFRA_FONTES: "bcb-copom, fed" }).config.decifra.sources, ["bcb-copom", "fed"]);
+});

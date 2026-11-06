@@ -48,6 +48,8 @@ const FILTERS = {
   brasil: (it) => it.region === 'BR',
   mundo: (it) => it.region === 'INTL',
   urgentes: (it) => it.urgency === 'urgente' || it.urgency === 'alta',
+  oficiais: (it) => !it.press,
+  imprensa: (it) => it.press,
 };
 
 const CONN_TEXT = {
@@ -253,6 +255,25 @@ const state = {
   statusFailed: false,
 };
 
+/** The "PlatomAI decifra" sections, or null when the headline has none (the API sends only published ones). */
+function normalizeDecifra(raw) {
+  if (!raw || typeof raw !== 'object' || raw.status !== 'publicado') return null;
+  const title = str(raw.title).trim();
+  const analysis = Array.isArray(raw.analysis) ? raw.analysis.map(str).map((p) => p.trim()).filter(Boolean) : [];
+  if (!title || !analysis.length) return null;
+  return {
+    title,
+    subtitle: str(raw.subtitle).trim(),
+    date: str(raw.date).trim(),
+    summary: str(raw.summary).trim(),
+    analysis,
+    impact: (Array.isArray(raw.impact) ? raw.impact : [])
+      .map((i) => ({ label: str(i?.label).trim(), text: str(i?.text).trim() }))
+      .filter((i) => i.label && i.text),
+    keyMessage: str(raw.keyMessage).trim(),
+  };
+}
+
 function normalizeHeadline(raw) {
   if (!raw || typeof raw !== 'object') return null;
   const id = raw.id == null ? '' : String(raw.id);
@@ -278,11 +299,14 @@ function normalizeHeadline(raw) {
     topics: Array.isArray(raw.topics) ? raw.topics.filter((t) => typeof t === 'string') : [],
     url: safeUrl(raw.url),
     method: str(raw.method),
+    // A press outlet's own title: shown with its credit, never rewritten.
+    press: raw.method === 'titulo',
+    decifra: normalizeDecifra(raw.decifra),
     status: str(raw.status),
     backfill: raw.backfill === true,
     sig: JSON.stringify(raw),
   };
-  item.haystack = fold([item.headline, item.explainer, item.tag, item.sourceName, ...item.topics].join(' \u0000 '));
+  item.haystack = fold([item.headline, item.explainer, item.tag, item.sourceName, item.decifra?.title, ...item.topics].join(' \u0000 '));
   return item;
 }
 
@@ -344,6 +368,7 @@ const rowCache = new Map();   // id → { item, node }
 const dayCache = new Map();   // YYYY-MM-DD → { node, main, sub, list }
 const fresh = new Set();          // ids that just arrived (highlight)
 const freshExplainer = new Set(); // ids whose "PlatomAI explica" just arrived
+const freshDecifra = new Set();   // ids whose "PlatomAI decifra" just arrived
 let lastStateSig = '';
 let renderQueued = false;
 
@@ -367,6 +392,8 @@ function buildRow(item) {
   if (item.urgency === 'urgente') text.append(h('span', { class: 'flag flag-urgente' }, 'URGENTE'), ' ');
   else if (item.urgency === 'alta') text.append(h('span', { class: 'flag flag-alta' }, 'ALTA'), ' ');
   text.append(h('span', { class: 't-head', lang: item.lang }, item.headline));
+  // Press titles carry the outlet's name next to them: the title is theirs.
+  if (item.press && item.sourceName) text.append(' ', h('span', { class: 't-credit' }, `— ${item.sourceName}`));
   if (item.status === 'revisar') text.append(' ', h('span', { class: 'badge' }, 'em revisão'));
   // A review copy also uses the source title, but the AI is not off: "em revisão" says it already.
   if (item.method === 'rascunho' && item.status !== 'revisar') text.append(' ', h('span', { class: 'badge' }, 'rascunho (IA desligada)'));
@@ -378,10 +405,12 @@ function buildRow(item) {
   );
 
   if (item.url) {
-    const label = item.sourceName ? `Fonte: ${item.sourceName} (abre em nova aba)` : 'Fonte (abre em nova aba)';
+    const label = item.press
+      ? `Ler no ${item.sourceName || 'veículo'} (abre em nova aba)`
+      : item.sourceName ? `Fonte: ${item.sourceName} (abre em nova aba)` : 'Fonte (abre em nova aba)';
     node.append(
       h('a', { class: 't-src', href: item.url, target: '_blank', rel: 'noopener', 'aria-label': label },
-        'fonte', h('span', { 'aria-hidden': 'true' }, ' ↗')),
+        item.press ? 'ler' : 'fonte', h('span', { 'aria-hidden': 'true' }, ' ↗')),
     );
   }
 
@@ -392,6 +421,8 @@ function buildRow(item) {
     );
   }
 
+  if (item.decifra) node.append(buildDecifra(item));
+
   if (fresh.has(item.id)) {
     node.classList.add('is-new');
     const done = () => node.classList.remove('is-new');
@@ -399,6 +430,29 @@ function buildRow(item) {
     setTimeout(done, 6000); // still cleans up with animations off
   }
   return node;
+}
+
+/** The "PlatomAI decifra" card: closed by default, so the tape stays a tape. */
+function buildDecifra(item) {
+  const d = item.decifra;
+  const sec = (title, ...body) => h('section', { class: 'dec-sec' }, h('h3', { class: 'dec-h' }, title), ...body);
+  const last = d.analysis.length - 1;
+  return h('details', { class: `t-dec${freshDecifra.has(item.id) ? ' is-fresh' : ''}` },
+    h('summary', { class: 'dec-sum' },
+      h('span', { class: 'dec-lbl' }, 'PlatomAI decifra'), ' ',
+      h('span', { class: 'dec-title' }, d.title)),
+    h('div', { class: 'dec-body' },
+      d.subtitle ? h('p', { class: 'dec-sub' }, d.subtitle) : null,
+      d.date ? h('p', { class: 'dec-date' }, d.date) : null,
+      d.summary ? sec('Resumo', h('p', null, d.summary)) : null,
+      sec('PlatomAI decifra', ...d.analysis.map((p, i) => h('p', { class: i === last && last > 0 ? 'dec-image' : null }, p))),
+      d.impact.length ? sec('Impacto nos mercados',
+        h('ul', { class: 'dec-list' }, ...d.impact.map((i) => h('li', null, h('strong', null, `${i.label}:`), ' ', i.text)))) : null,
+      d.keyMessage ? sec('Mensagem-chave', h('p', null, d.keyMessage)) : null,
+      h('p', { class: 'dec-sign' }, 'Platom.AI — Inteligência Financeira em Linguagem Clara'),
+      h('p', { class: 'dec-note' }, 'Análise de mercado com base no documento oficial. Não é recomendação de investimento.'),
+    ),
+  );
 }
 
 function rowFor(item) {
@@ -467,6 +521,7 @@ function renderFeed() {
   for (const id of rowCache.keys()) if (!state.items.has(id)) rowCache.delete(id);
   fresh.clear();
   freshExplainer.clear();
+  freshDecifra.clear();
 
   // If an update replaced the row that had focus, give focus back to the new link.
   if (focusedId && !el.feed.contains(document.activeElement)) {
@@ -670,6 +725,7 @@ function replaceItem(prev, item) {
   item.sortTs = prev.sortTs;
   item.day = prev.day;
   if (!prev.explainer && item.explainer) freshExplainer.add(item.id);
+  if (!prev.decifra && item.decifra) freshDecifra.add(item.id);
   putItem(item);
 }
 

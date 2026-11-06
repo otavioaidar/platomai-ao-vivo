@@ -171,6 +171,7 @@ export function ibgeReleases(agenda: Agenda, scale: number): Source {
     name: "IBGE (releases)",
     tag: "IBGE",
     region: "BR",
+    kind: "oficial",
     intervalMs: pollEvery(30 * S, scale),
     hotIntervalMs: (now) => (agenda.anyHot(now) ? pollEvery(3 * S, scale) : null),
     nextHotAt: (now) => agenda.nextHotAt(() => true, now),
@@ -351,6 +352,7 @@ export function sidraSource(spec: SidraSpec, agenda: Agenda, scale: number): Sou
     name: `IBGE/SIDRA ${spec.label}`,
     tag: "IBGE",
     region: "BR",
+    kind: "oficial",
     intervalMs: pollEvery(120 * S, scale),
     hotIntervalMs: (now) => {
       const r = agenda.current(spec.calendarTitle, now);

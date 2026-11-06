@@ -1,7 +1,7 @@
 import { XMLParser } from "fast-xml-parser";
 import { fetchConditional, fetchText, pollEvery } from "../net.ts";
 import { decodeEntities, extractArticle, htmlToText } from "../text.ts";
-import type { RawItem, Region, Source } from "../types.ts";
+import type { RawItem, Region, Source, SourceKind } from "../types.ts";
 
 export interface FeedEntry {
   id: string;
@@ -146,6 +146,7 @@ export interface FeedSourceOptions {
   windows?: PollWindow[];
   /** Fetch the linked page for the full text (feeds that carry only a title). */
   fetchArticle?: boolean;
+  kind?: SourceKind;
 }
 
 /** How often an unchanged feed's entries are handed to the pipeline again (it skips the ones already seen). */
@@ -159,6 +160,7 @@ export function feedSource(o: FeedSourceOptions): Source {
     name: o.name,
     tag: o.tag,
     region: o.region,
+    ...(o.kind ? { kind: o.kind } : {}),
     intervalMs: o.intervalMs,
     hotIntervalMs: (now) => windowInterval(windows, now),
     nextHotAt: (now) => nextWindowStart(windows, now),
@@ -212,7 +214,7 @@ export function officialFeeds(scale: number): Source[] {
   const bcb = "https://www.bcb.gov.br/api/feed/sitebcb/sitefeeds/";
   const every = (ms: number) => pollEvery(ms, scale);
   const hot = (ws: PollWindow[]) => ws.map((w) => ({ ...w, everyMs: every(w.everyMs) }));
-  return [
+  const feeds = [
     feedSource({ id: "bcb-copom", name: "Copom (comunicados)", tag: "COPOM", region: "BR", url: bcb + "comunicadoscopom", lang: "pt", intervalMs: every(5 * MIN), windows: hot(COPOM_WINDOWS.comunicados) }),
     feedSource({ id: "bcb-atas", name: "Copom (atas)", tag: "COPOM", region: "BR", url: bcb + "atascopom", lang: "pt", intervalMs: every(10 * MIN), windows: hot(COPOM_WINDOWS.atas) }),
     feedSource({ id: "bcb-notas", name: "Banco Central (notas)", tag: "BCB", region: "BR", url: bcb + "notasImprensa", lang: "pt", intervalMs: every(30 * S) }),
@@ -220,4 +222,5 @@ export function officialFeeds(scale: number): Source[] {
     feedSource({ id: "fed-speeches", name: "Fed (discursos)", tag: "FED", region: "INTL", url: "https://www.federalreserve.gov/feeds/speeches.xml", lang: "en", intervalMs: every(60 * S), fetchArticle: true }),
     feedSource({ id: "ecb-press", name: "BCE (imprensa)", tag: "BCE", region: "INTL", url: "https://www.ecb.europa.eu/rss/press.html", lang: "en", intervalMs: every(30 * S), fetchArticle: true }),
   ];
+  return feeds.map((f): Source => ({ ...f, kind: "oficial" }));
 }

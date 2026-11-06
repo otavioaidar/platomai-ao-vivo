@@ -25,6 +25,15 @@ export interface NewJob {
   backfill: boolean;
 }
 
+/** A headline waiting for its "PlatomAI decifra", kept in SQLite so a restart never loses it. */
+export interface DecifraJob {
+  headlineId: string;
+  sourceName: string;
+  /** The item the headline was written from, enriched (full text, filing or numeric release). */
+  item: RawItem;
+  attempts: number;
+}
+
 interface PendingRow {
   raw_key: string;
   source_id: string;
@@ -68,6 +77,15 @@ export class Store {
         json TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS ix_headlines_pub ON headlines(published_at DESC);
+      CREATE TABLE IF NOT EXISTS decifra_pending (
+        headline_id TEXT PRIMARY KEY,
+        source_name TEXT NOT NULL,
+        item_json TEXT NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        next_attempt_at INTEGER NOT NULL,
+        created_at INTEGER NOT NULL,
+        last_error TEXT
+      );
     `);
   }
 
@@ -151,12 +169,59 @@ export class Store {
     this.stmt("UPDATE pending SET attempts = ?, next_attempt_at = ?, last_error = ? WHERE raw_key = ?").run(attempts, nextAttemptAt, error, key);
   }
 
-  /** Stores the final outcome of a queued item (a headline, or null when it was discarded) and removes it from the queue. */
-  finish(key: string, h: Headline | null): void {
+  /**
+   * Stores the final outcome of a queued item (a headline, or null when it was discarded) and removes it from the
+   * queue. With `decifra`, the headline is also queued for its analysis, in the same transaction.
+   */
+  finish(key: string, h: Headline | null, decifra?: { sourceName: string; item: RawItem; at: number }): void {
     this.tx(() => {
       if (h) this.save(h);
+      if (h && decifra) {
+        this.stmt(
+          `INSERT OR IGNORE INTO decifra_pending (headline_id, source_name, item_json, attempts, next_attempt_at, created_at)
+           VALUES (?, ?, ?, 0, ?, ?)`,
+        ).run(h.id, decifra.sourceName, JSON.stringify(decifra.item), decifra.at, decifra.at);
+      }
       this.stmt("DELETE FROM pending WHERE raw_key = ?").run(key);
     });
+  }
+
+  /** Headlines whose analysis is due, oldest first. */
+  dueDecifra(now: number, limit = 20): DecifraJob[] {
+    const rows = this.stmt(
+      `SELECT headline_id, source_name, item_json, attempts FROM decifra_pending
+       WHERE next_attempt_at <= ? ORDER BY created_at, rowid LIMIT ?`,
+    ).all(now, limit) as { headline_id: string; source_name: string; item_json: string; attempts: number }[];
+    return rows.map((r) => ({ headlineId: r.headline_id, sourceName: r.source_name, item: JSON.parse(r.item_json) as RawItem, attempts: r.attempts }));
+  }
+
+  decifraPendingCount(): number {
+    return (this.stmt("SELECT COUNT(*) AS n FROM decifra_pending").get() as { n: number }).n;
+  }
+
+  retryDecifra(headlineId: string, attempts: number, nextAttemptAt: number, error: string): void {
+    this.stmt("UPDATE decifra_pending SET attempts = ?, next_attempt_at = ?, last_error = ? WHERE headline_id = ?").run(attempts, nextAttemptAt, error, headlineId);
+  }
+
+  /** Removes a headline from the analysis queue and, when given, stores what the analysis changed, atomically. */
+  finishDecifra(headlineId: string, change?: (h: Headline) => Headline | null): Headline | null {
+    return this.tx(() => {
+      const out = change ? this.update(headlineId, change) : null;
+      this.stmt("DELETE FROM decifra_pending WHERE headline_id = ?").run(headlineId);
+      return out;
+    });
+  }
+
+  /**
+   * Read-modify-write of one headline, so background additions (the explainer, the decifra, an approval) never
+   * overwrite each other. `change` returns the new headline, or null to leave it as it is. Returns what was saved.
+   */
+  update(id: string, change: (h: Headline) => Headline | null): Headline | null {
+    const h = this.get(id);
+    if (!h) return null;
+    const next = change(h);
+    if (next) this.save(next);
+    return next;
   }
 
   save(h: Headline): void {
@@ -183,6 +248,16 @@ export class Store {
   /** Everything waiting for a human (failed checks, refusals, internal-only sources), newest first. */
   reviewQueue(limit: number): Headline[] {
     const rows = this.stmt("SELECT json FROM headlines WHERE status = 'revisar' ORDER BY published_at DESC LIMIT ?").all(limit) as { json: string }[];
+    return rows.map((r) => JSON.parse(r.json) as Headline);
+  }
+
+  /** Analyses waiting for a reviewer, and the NÃO VALE TEXTO answers of the last ones, newest first. */
+  decifraQueue(limit: number): Headline[] {
+    const rows = this.stmt(
+      `SELECT json FROM headlines
+       WHERE json_extract(json, '$.decifra.status') = 'revisar' OR json_extract(json, '$.decifraSkipped') IS NOT NULL
+       ORDER BY published_at DESC LIMIT ?`,
+    ).all(limit) as { json: string }[];
     return rows.map((r) => JSON.parse(r.json) as Headline);
   }
 

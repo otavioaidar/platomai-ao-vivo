@@ -93,15 +93,17 @@ export function fenced(text: string): string {
   return text.replace(/<\s*(\/?)\s*fonte\s*>/gi, "[$1fonte]");
 }
 
-/** Reads the editorial line from disk, re-reading only when the file changes. */
-class Editorial {
+/** Reads a prompt file (the editorial line, the decifra agent) from disk, re-reading only when the file changes. */
+export class Editorial {
   private text = "";
   private mtime = 0;
   private warned = false;
   private readonly path: string;
+  private readonly what: string;
 
-  constructor(path: string) {
+  constructor(path: string, what = "linha editorial") {
     this.path = path;
+    this.what = what;
   }
 
   get(): string {
@@ -111,15 +113,25 @@ class Editorial {
         this.text = fs.readFileSync(this.path, "utf8");
         this.mtime = m;
         this.warned = false;
-        log.info("linha editorial carregada", { path: this.path });
+        log.info(`arquivo carregado: ${this.what}`, { path: this.path });
       }
     } catch (err) {
       // keep the last good copy; say so once, since urgency rules live in this file
-      if (!this.warned) log.warn("linha editorial indisponível", err);
+      if (!this.warned) log.warn(`arquivo indisponível: ${this.what}`, err);
       this.warned = true;
     }
     return this.text;
   }
+}
+
+/**
+ * The Anthropic client for the app. With PLATOMAI_ANTHROPIC_API_KEY it uses that key against `baseUrl` and ignores
+ * the ANTHROPIC_* variables of the machine (a development container may carry its own); without it, the SDK
+ * reads ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN as usual.
+ */
+export function anthropicClient(opts: { apiKey: string; baseUrl: string; timeoutMs?: number }): Anthropic {
+  const common = { maxRetries: 2, timeout: opts.timeoutMs ?? 60_000 };
+  return opts.apiKey ? new Anthropic({ ...common, apiKey: opts.apiKey, authToken: null, baseURL: opts.baseUrl }) : new Anthropic(common);
 }
 
 export class ClaudeWriter implements Writer {
