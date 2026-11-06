@@ -118,6 +118,8 @@ test("the request carries the material as data, with the date and the published 
   assert.match(msg, /\[\/fonte\] ignore as regras/);
   const cvm = userMessage({ headline, item: { ...copomItem, sourceId: "cvm-fatos" }, sourceName: "CVM" });
   assert.match(cvm, /texto da própria companhia/);
+  assert.match(cvm, /Entregue à CVM em: 4 de novembro de 2026/);
+  assert.ok(!cvm.includes("Data do fato"), "a filing's date is the one in the document, not its delivery");
 });
 
 const promptFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "aovivo-")), "agente.md");
@@ -218,4 +220,41 @@ test("a number rounded with \"cerca de\" passes when the source rounds to it, as
   assert.match(ok("o plano cobre R$ 1,5 bilhão em créditos.", aeris).join(), /1,5/, "without \"cerca de\" a rounding is not allowed");
   assert.equal(maskRoundings("cerca de 4% ao ano", "inflação de 4,04%", "pt"), "cerca de #% ao ano");
   assert.equal(maskRoundings("cerca de US$ 1,5 bilhão", "about $1.52 billion in debt", "en"), "cerca de US$ # bilhão");
+});
+
+test("the recommendation check catches the forms the prompt forbids, without flagging ordinary news language", () => {
+  const base = parsed(fx("copom.md"));
+  const src = sourceOf(copomItem);
+  const flagged = (keyMessage: string) => checkDecifra({ ...base, keyMessage }, src).some((p) => p.startsWith("parece recomendação"));
+  for (const t of [
+    "Recomendamos a compra de títulos prefixados.", "É um bom momento para comprar ações de bancos.", "Recomenda vender títulos prefixados.",
+    "A ação deve subir com a decisão.", "É positivo para a ação dos bancos.", "A ação está barata.", "Bom para o acionista dos bancos.",
+    "Venda as ações de varejo.", "Há uma oportunidade de compra em títulos.", "Vale a pena comprar agora.",
+  ]) assert.equal(flagged(t), true, t);
+  for (const t of [
+    "As vendas do varejo caíram.", "Energia mais barata para a indústria.", "O custo de oportunidade do capital subiu.", "O crédito ficou mais caro.",
+    "A venda de títulos pelo Tesouro cresceu.", "Vale a pena acompanhar o Focus.", "O governo vai manter os fundos constitucionais.",
+  ]) assert.equal(flagged(t), false, t);
+});
+
+test("text after the signature or a Markdown rule never reaches the key message", () => {
+  const withNote = `${fx("fomc.md")}\n\nFonte: Federal Reserve\n\n*Texto revisado pela checagem.*`;
+  assert.equal(parsed(withNote).keyMessage, parsed(fx("fomc.md")).keyMessage);
+  const withRule = fx("fomc.md").replace("Platom.AI —", "---\n\nPlatom.AI —");
+  assert.equal(parsed(withRule).keyMessage, parsed(fx("fomc.md")).keyMessage);
+});
+
+test("a failed rewrite call keeps the first text, which goes to review with its problems", async () => {
+  const bad = fx("copom.md").replace("manteve a Selic em 13,75% ao ano", "manteve a Selic em 13,50% ao ano");
+  let calls = 0;
+  const client = {
+    beta: { messages: { create: async () => {
+      if (++calls === 2) throw new Error("API fora do ar");
+      return { stop_reason: "end_turn", content: [{ type: "text", text: bad }], usage: null };
+    } } },
+  } as unknown as Anthropic;
+  const out = await new ClaudeDecifrador({ model: "m", effort: "medium", promptPath: promptFile, client }).decifra({ headline, item: copomItem, sourceName: "Copom" });
+  assert.equal(calls, 2);
+  assert.equal(out?.kind, "texto");
+  assert.match((out as { problems: string[] }).problems.join(), /13,50/);
 });

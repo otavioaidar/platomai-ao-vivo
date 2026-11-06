@@ -29,7 +29,7 @@ export interface PipelineOptions {
     /** revisao: every text waits for approval; automatica: texts that pass every check are published at once. */
     mode: "revisao" | "automatica";
     concurrency: number;
-    /** Source ids or id prefixes that get a decifra ("bcb" covers bcb-copom); empty or absent: every official source. */
+    /** Source ids or id prefixes that get a decifra ("bcb" covers bcb-copom); absent: every official source; empty: none. */
     sources?: string[];
     /** Fatos relevantes (cvm-*) get a decifra only from this urgency up; absent: every one. */
     cvmMinUrgency?: Urgency;
@@ -376,7 +376,8 @@ export class Pipeline {
   private wantsDecifra(src: Source, h: Headline): boolean {
     const d = this.o.decifra;
     if (!d || src.kind !== "oficial" || h.status !== "publicado" || h.backfill || h.internalOnly || h.method === "rascunho") return false;
-    if (d.sources?.length && !d.sources.some((p) => src.id === p || src.id.startsWith(`${p}-`))) return false;
+    // An empty list (DECIFRA_FONTES with no valid value) means none: a bad setting never widens the decifra.
+    if (d.sources && !d.sources.some((p) => src.id === p || src.id.startsWith(`${p}-`))) return false;
     // Only the fatos relevantes the editorial line ranks as relevant: routine filings keep their headline, without analysis.
     if (src.id.startsWith("cvm") && d.cvmMinUrgency && !meetsUrgency(h, d.cvmMinUrgency)) return false;
     return true;
@@ -433,17 +434,22 @@ export class Pipeline {
       this.o.store.finishDecifra(id);
       return;
     }
+    // The attempt is booked before the paid call: if the database cannot write, the AI is not called, and if saving
+    // the answer fails afterwards (or the process dies mid-call), the job still counts toward DECIFRA_MAX_ATTEMPTS.
+    const attempts = job.attempts + 1;
+    const retryAt = this.now() + DECIFRA_RETRY_MS * 2 ** (attempts - 1);
+    this.o.store.retryDecifra(id, attempts, retryAt, "em andamento");
     let out;
     try {
       out = await d.writer.decifra({ headline: h, item: job.item, sourceName: job.sourceName });
     } catch (err) {
-      const attempts = job.attempts + 1;
       if (attempts >= DECIFRA_MAX_ATTEMPTS) {
         log.error(`decifra de ${id}: desistindo após ${attempts} tentativas`, err);
-        this.o.store.finishDecifra(id);
+        // Recorded for the review page (never public), so a wrong key or a long outage does not vanish silently.
+        this.o.store.finishDecifra(id, (cur) => ({ ...cur, decifraSkipped: `falhou após ${attempts} tentativas: ${errorText(err)}` }));
       } else {
         log.warn(`decifra de ${id} falhou (tentativa ${attempts})`, err);
-        this.o.store.retryDecifra(id, attempts, this.now() + DECIFRA_RETRY_MS * 2 ** (attempts - 1), errorText(err));
+        this.o.store.retryDecifra(id, attempts, retryAt, errorText(err));
       }
       return;
     }

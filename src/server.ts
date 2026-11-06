@@ -139,7 +139,8 @@ function indexPage(deps: ServerDeps) {
       } catch (err) {
         log.warn("manchetes da página indisponíveis; a página sai sem elas", err); // the live list still loads
       }
-      page = { at: now, html: template.html.replace(FEED_MARK, feed) };
+      // A function as the replacement: a "$'" or "$&" in a headline ("US$") is text, not a replacement pattern.
+      page = { at: now, html: template.html.replace(FEED_MARK, () => feed) };
     }
     res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-cache" });
     res.end(page.html);

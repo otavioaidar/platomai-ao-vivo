@@ -102,13 +102,16 @@ export function parseDecifra(raw: string): Parsed {
   const idx = ORDER.map((s) => at[s] as number);
   if (idx.some((v, i) => i > 0 && v < idx[i - 1])) return { kind: "invalido", problems: ["formato: seções fora de ordem"] };
 
+  // The last section ends at the signature: anything after it (a note, a checklist) is never part of the text.
+  const sigAt = lines.findIndex((l, i) => i > idx[ORDER.length - 1] && isSignature(l));
+  const isRule = (l: string) => /^\s*(?:[-*_]\s*){3,}$/.test(l);
   const body = (s: Section) => {
     const i = ORDER.indexOf(s);
-    const end = i + 1 < ORDER.length ? idx[i + 1] : lines.length;
-    return lines.slice(idx[i] + 1, end).filter((l) => !isSignature(l)).map(plain);
+    const end = i + 1 < ORDER.length ? idx[i + 1] : sigAt >= 0 ? sigAt : lines.length;
+    return lines.slice(idx[i] + 1, end).filter((l) => !isSignature(l) && !isRule(l)).map(plain);
   };
   const problems: string[] = [];
-  const head = lines.slice(0, idx[0]).map(plain).filter(Boolean);
+  const head = lines.slice(0, idx[0]).filter((l) => !isRule(l)).map(plain).filter(Boolean);
   if (head.length !== 3) problems.push(`formato: antes do Resumo vêm título, subtítulo e data (vieram ${head.length} linhas)`);
   const impact: DecifraText["impact"] = [];
   for (const l of body("impact").filter(Boolean)) {
@@ -163,8 +166,21 @@ const NEVER = [
   "os próximos dados serão importantes", "é importante monitorar", "o tema segue no radar", "realização de lucros", "bolsa cara",
 ];
 /** Anything that reads as a call to buy or sell. PlatomAI never recommends. */
-const RECOMMENDATION =
-  /pre[çc]o[- ]alvo|potencial de (?:valoriza[çc][ãa]o|alta)|recomenda(?:ção|ções|mos|m)?\s+(?:de\s+)?(?:compra|venda)|(?<![\p{L}])compre(?![\p{L}])|hora de (?:comprar|vender)|vale a pena (?:comprar|investir)|(?:comprar|vender)\s+(?:a ação|as ações|o papel|os papéis)/iu;
+const INVESTMENT = String.raw`(?:(?:a|as|o|os)\s+)?(?:a[çc][ãa]o|a[çc][õo]es|pap[ée]is|papel|t[íi]tulos?|cotas?|fundos?)`;
+const RECOMMENDATION = new RegExp(
+  [
+    String.raw`pre[çc]o[- ]alvo|potencial de (?:valoriza[çc][ãa]o|alta)`,
+    String.raw`recomend\p{L}*\s+(?:(?:a|de)\s+)?(?:compra|venda|comprar|vender|manter)`,
+    String.raw`(?<![\p{L}])compre(?![\p{L}])|hora de (?:comprar|vender)|vale a pena (?:comprar|investir|entrar)`,
+    // A buy or sell verb with an investment as its object ("comprar ações", "Venda as ações"); "venda de títulos" is news.
+    String.raw`(?<![\p{L}])(?:comprar|vender|comprem|vendam|mantenha|venda)\s+` + INVESTMENT,
+    String.raw`bom momento para|boa hora para|oportunidades? de (?:compra|investimento|entrada)`,
+    String.raw`(?:a a[çc][ãa]o|as a[çc][õo]es|o papel|os pap[ée]is)\s+(?:deve|devem|tende|tendem|pode|podem|vai|v[ãa]o)\s+(?:subir|cair|valorizar|se valorizar|desvalorizar)`,
+    String.raw`(?:positiv|negativ|bo|ruim|ruins)\p{L}*\s+para\s+(?:a a[çc][ãa]o|as a[çc][õo]es|o papel|os pap[ée]is|o acionista|os acionistas)`,
+    String.raw`(?:a[çc][ãa]o|a[çc][õo]es|papel|pap[ée]is)\s+(?:\p{L}+\s+)?(?:barat|car)[oa]s?(?![\p{L}])`,
+  ].join("|"),
+  "iu",
+);
 /** The text can be read days later: the agent prompt asks for the date instead. */
 const RELATIVE_DAY = /(?<![\p{L}])(?:hoje|ontem|amanhã|nesta semana)(?![\p{L}])/iu;
 /** The Resumo names its source: "Segundo o Banco Central…", "Em comunicado, o Fed…". */
@@ -320,7 +336,8 @@ export function userMessage(input: DecifraInput, draft?: { text: string; problem
       : "Escreva o \"PlatomAI decifra\" desta notícia de fonte oficial, no Formato de entrega, ou responda só a linha NÃO VALE TEXTO.",
     "",
     `Fonte: ${input.sourceName}`,
-    `Data do fato: ${ptDate(item.publishedAt)}`,
+    // A filing's own date can be earlier than its delivery to the CVM (Aeris: dated 03/11, delivered 04/11 at 00:04).
+    item.sourceId.startsWith("cvm") ? `Entregue à CVM em: ${ptDate(item.publishedAt)}` : `Data do fato: ${ptDate(item.publishedAt)}`,
     `Idioma do material: ${item.lang === "en" ? "inglês (traduza com fidelidade)" : "português"}`,
     `Link do documento: ${safeLink(item.url)}`,
     `Manchete já publicada no site: ${headline.headline}`,
@@ -415,7 +432,14 @@ export class ClaudeDecifrador implements Decifrador {
     // One automatic rewrite with the problem list; whatever comes back is final (a human sees what is left).
     const problems = a.problems;
     log.info(`decifra de ${input.headline.id}: reescrevendo`, { problemas: problems });
-    const second = await this.ask(userMessage(input, { text: first, problems }));
+    let second: string | null;
+    try {
+      second = await this.ask(userMessage(input, { text: first, problems }));
+    } catch (err) {
+      // The first text is paid for and goes to review with its problems; a failed rewrite does not throw it away.
+      log.warn(`decifra de ${input.headline.id}: reescrita falhou; o primeiro texto vai para revisão`, err);
+      return a;
+    }
     if (second === null) return a;
     const b = review(second);
     if (b.kind === "invalido" && a.kind === "texto") return a;

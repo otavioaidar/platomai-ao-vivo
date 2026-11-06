@@ -852,3 +852,50 @@ test("an item that enrich marks as a copy of another is dropped: no headline, no
   assert.equal(s.store.latest(10).length, 0);
   assert.equal(s.store.pendingCount(), 0);
 });
+
+test("an empty DECIFRA_FONTES list means no decifra at all", async () => {
+  const s = setupDecifra("automatica", "oficial", undefined, []);
+  await s.p.runOnce(s.src);
+  await s.p.runOnce(s.src);
+  await s.p.drain(2000);
+  assert.equal(s.decifrador.calls.length, 0);
+});
+
+test("a decifra whose answer cannot be saved still counts the attempt, and a final failure is recorded for the review page", async () => {
+  const s = setupDecifra("automatica");
+  await s.p.runOnce(s.src);
+  const [h] = await s.p.runOnce(s.src);
+  // The call fails every time: after the last attempt the give-up is written on the headline (internal only).
+  s.store.db.prepare("DELETE FROM decifra_pending").run();
+  s.store.db.prepare("INSERT INTO decifra_pending (headline_id, source_name, item_json, attempts, next_attempt_at, created_at) VALUES (?, 'Fonte', ?, 4, 0, 0)").run(h.id, JSON.stringify(item("1", "x")));
+  s.store.update(h.id, (cur) => ({ ...cur, decifra: undefined }));
+  s.decifrador.failures = 1;
+  (s.p as unknown as { pumpDecifra(): void }).pumpDecifra();
+  await s.p.drain(2000);
+  assert.equal(s.store.decifraPendingCount(), 0);
+  assert.match(s.store.get(h.id)?.decifraSkipped ?? "", /^falhou após 5 tentativas: API fora do ar/);
+
+  // Saving the answer fails: the job is not called again right away, and its attempt was counted.
+  const t = setupDecifra("automatica");
+  await t.p.runOnce(t.src);
+  const realFinish = t.store.finishDecifra.bind(t.store);
+  let broken = true;
+  t.store.finishDecifra = ((id: string, change?: (h: Headline) => Headline | null) => {
+    if (broken && change) throw new Error("SQLITE_FULL");
+    return realFinish(id, change);
+  }) as typeof t.store.finishDecifra;
+  const [h2] = await t.p.runOnce(t.src);
+  await t.p.drain(2000);
+  assert.equal(t.decifrador.calls.length, 1);
+  const [job] = t.store.db.prepare("SELECT attempts, next_attempt_at FROM decifra_pending").all() as { attempts: number; next_attempt_at: number }[];
+  assert.equal(job.attempts, 1);
+  assert.ok(job.next_attempt_at > t.clock.t, "not due again at once");
+  (t.p as unknown as { pumpDecifra(): void }).pumpDecifra();
+  await t.p.drain(2000);
+  assert.equal(t.decifrador.calls.length, 1, "no paid call on every pump tick");
+  broken = false;
+  t.clock.t += 61_000;
+  (t.p as unknown as { pumpDecifra(): void }).pumpDecifra();
+  await t.p.drain(2000);
+  assert.equal(t.store.get(h2.id)?.decifra?.status, "publicado");
+});

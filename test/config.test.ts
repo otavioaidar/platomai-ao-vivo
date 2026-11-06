@@ -183,3 +183,13 @@ test("decifra and press settings are read and checked", () => {
   assert.deepEqual(load({ IMPRENSA_FONTES: "nenhuma" }).config.press.outlets, []);
   assert.deepEqual(load({ DECIFRA_FONTES: "bcb-copom, fed" }).config.decifra.sources, ["bcb-copom", "fed"]);
 });
+
+test("source lists accept any case and separator, and a list with no valid value turns the thing off instead of on", () => {
+  assert.deepEqual(load({ DECIFRA_FONTES: "CVM" }).config.decifra.sources, ["cvm"]);
+  assert.deepEqual(load({ DECIFRA_FONTES: "cvm;BCB fed" }).config.decifra.sources, ["cvm", "bcb", "fed"]);
+  const off = load({ DECIFRA_FONTES: "c.v.m" });
+  assert.deepEqual(off.config.decifra.sources, [], "a typo never widens the decifra to every source");
+  assert.ok(off.warnings.some((w) => w.includes("desligado")));
+  assert.deepEqual(load({ IMPRENSA_FONTES: "G1; Poder360" }).config.press.outlets, ["g1", "poder360"]);
+  assert.deepEqual(load({ IMPRENSA_FONTES: "valor" }).config.press.outlets, []);
+});

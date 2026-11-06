@@ -85,3 +85,21 @@ test("the home page carries the latest headlines in its HTML, and the RSS uses t
     srv.close();
   }
 });
+
+test("a \"$\" in a headline is text: the page is assembled without replacement patterns", async () => {
+  const pub = fs.mkdtempSync(path.join(os.tmpdir(), "aovivo-pub-"));
+  fs.writeFileSync(path.join(pub, "index.html"), '<!doctype html><main><div id="feed"><!--manchetes--></div></main><footer>rodapé</footer></html>');
+  const store = new Store(":memory:");
+  store.save({ ...base, publishedAt: new Date().toISOString(), headline: "Governo libera 'US$' e S$&P e US$` para importação" });
+  const srv = createServer({ store, hub: new Hub(60_000), agenda: new Agenda(), publicDir: pub, siteUrl: "https://aovivo.example", showReview: false, ai: { enabled: false, model: "x" }, statuses: () => [] });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  try {
+    const page = await (await fetch(`http://127.0.0.1:${(srv.address() as AddressInfo).port}/`)).text();
+    assert.equal(page.split("</html>").length, 2, "one document end");
+    assert.equal(page.split("rodapé").length, 2);
+    assert.ok(page.includes("Governo libera 'US$' e S$&amp;P e US$` para importação"));
+  } finally {
+    srv.closeAllConnections();
+    srv.close();
+  }
+});

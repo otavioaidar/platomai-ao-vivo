@@ -65,14 +65,22 @@ function reader(env: Env, warn: (msg: string) => void) {
       return def;
     },
 
-    /** Comma-separated values, trimmed; values that fail `valid` are dropped with a warning. */
-    list(name: string, def: readonly string[], valid: (v: string) => boolean, expected: string): string[] {
+    /**
+     * Comma-separated values, trimmed; values that fail `valid` are dropped with a warning. `lower` also accepts
+     * spaces or semicolons between values and any letter case. `failClosed`: when no value is valid, the result is
+     * empty instead of the default, so a typo meant to narrow something never widens it.
+     */
+    list(name: string, def: readonly string[], valid: (v: string) => boolean, expected: string, opts: { lower?: boolean; failClosed?: boolean } = {}): string[] {
       const v = raw(name);
       if (v === undefined) return [...def];
-      const items = v.split(",").map((s) => s.trim()).filter(Boolean);
+      const items = (opts.lower ? v.toLowerCase().split(/[,;\s]+/) : v.split(",")).map((s) => s.trim()).filter(Boolean);
       const good = items.filter(valid);
       for (const b of items.filter((i) => !valid(i))) warn(`config: ${name} ignora "${b}" (${expected})`);
       if (good.length) return good;
+      if (opts.failClosed) {
+        warn(`config: ${name}="${v}" sem nenhum valor válido (${expected}); desligado`);
+        return [];
+      }
       bad(name, v, expected, def.join(","));
       return [...def];
     },
@@ -167,7 +175,7 @@ export function loadConfig(env: Env, warn: (msg: string) => void = (msg) => log.
       effort: r.oneOf("DECIFRA_ESFORCO", EFFORTS, "medium"),
       concurrency: r.num("DECIFRA_CONCORRENCIA", 2, 1, 5, true),
       /** Which official sources get a decifra, by id or id prefix ("bcb", "fed", "bcb-copom", "cvm"…). */
-      sources: r.list("DECIFRA_FONTES", DECIFRA_SOURCES, (v) => /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(v), "use prefixos como bcb, fed, ecb, ibge, sidra, cvm"),
+      sources: r.list("DECIFRA_FONTES", DECIFRA_SOURCES, (v) => /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(v), "use prefixos como bcb, fed, ecb, ibge, sidra, cvm", { lower: true, failClosed: true }),
       /**
        * Fatos relevantes get a decifra only from this urgency up. The headline writer sets it from the "Urgência" section
        * of the editorial line (alta: M&A, change of control, judicial recovery, share offering, revised projections,
@@ -178,7 +186,7 @@ export function loadConfig(env: Env, warn: (msg: string) => void = (msg) => log.
     },
     /** Press feeds: the outlet's title, credit and link, never rewritten and never sent to the AI. */
     press: {
-      outlets: r.list("IMPRENSA_FONTES", PRESS_DEFAULT, (v) => (PRESS_ALL as readonly string[]).includes(v) || v === "nenhuma", `use ${PRESS_ALL.join(", ")} ou nenhuma`)
+      outlets: r.list("IMPRENSA_FONTES", PRESS_DEFAULT, (v) => (PRESS_ALL as readonly string[]).includes(v) || v === "nenhuma", `use ${PRESS_ALL.join(", ")} ou nenhuma`, { lower: true, failClosed: true })
         .filter((v) => v !== "nenhuma"),
       intervalMs: r.num("IMPRENSA_INTERVALO_S", 60, 30, 3600, true) * 1000,
     },
