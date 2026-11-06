@@ -201,24 +201,35 @@ test("polls faster before the open and after the close on weekdays, when fatos r
   assert.equal(src.hotIntervalMs!(at("2026-11-05T15:00:00Z")), null);
 });
 
-test("the same fato relevante delivered twice in the same minute is one item", async (t) => {
+test("two filings with a generic subject in the same minute are both kept; only the same text is a copy", async (t) => {
   const recs = rad.d.dados.split("&*");
-  // A copy of the Porto Seguro filing under another protocol: same company, subject, version and minute.
-  const twin = recs[1].replace("'1109021','1','1584315'", "'1109022','1','1584316'");
-  stubFetch(t, () => json({ d: { temErro: false, dados: [twin, recs[1], recs[0], ""].join("&*") } }));
-  const src = cvmSource({ intervalMs: 30_000, extract: async () => null });
+  // Another Porto Seguro filing with the same subject and minute, under another protocol.
+  const other = recs[1].replace("'1109021','1','1584315'", "'1109022','1','1584316'");
+  stubFetch(t, (url) => (url.includes("ListarDocumentos") ? json({ d: { temErro: false, dados: [other, recs[1], ""].join("&*") } }) : json({ d: b64("%PDF-1.4 x\n%%EOF") })));
+  let text = "FATO RELEVANTE. A Porto Seguro informa a atualização das projeções de 2026 das suas unidades de negócio. ".repeat(3);
+  const src = cvmSource({ intervalMs: 30_000, extract: async () => text });
   const items = await src.poll();
-  assert.deepEqual(items.map((i) => i.externalId).sort(), ["1584315", "1584324"], "the lower protocol is kept");
-  // A later poll that lists only the twin still does not bring it back.
-  stubFetch(t, () => json({ d: { temErro: false, dados: [twin, ""].join("&*") } }));
-  assert.deepEqual(await src.poll(), []);
+  assert.deepEqual(items.map((i) => i.externalId).sort(), ["1584315", "1584316"], "the subject alone never hides a filing");
+  const porto = items.find((i) => i.externalId === "1584315")!;
+  const copy = items.find((i) => i.externalId === "1584316")!;
+  assert.equal((await src.enrich!(porto)).duplicateOf, undefined);
+  assert.equal((await src.enrich!(copy)).duplicateOf, "1584315", "the same text twice is one story (Lojas Renner, 05/11/2026)");
+  text = "FATO RELEVANTE. A Porto Seguro comunica a aquisição de uma corretora de seguros. ".repeat(3);
+  const fresh = cvmSource({ intervalMs: 30_000, extract: async () => text });
+  const again = await fresh.poll();
+  assert.equal((await fresh.enrich!(again[0])).duplicateOf, undefined);
+});
 
-  // The other way round: the copy listed first is kept, and the original listed later is not a second story.
-  const other = cvmSource({ intervalMs: 30_000, extract: async () => null });
-  stubFetch(t, () => json({ d: { temErro: false, dados: [twin, ""].join("&*") } }));
-  assert.deepEqual((await other.poll()).map((i) => i.externalId), ["1584316"]);
-  stubFetch(t, () => json({ d: { temErro: false, dados: [twin, recs[1], ""].join("&*") } }));
-  assert.deepEqual((await other.poll()).map((i) => i.externalId), ["1584316"]);
+test("a re-filing never owns a text: the live filing with the same PDF still goes out", async (t) => {
+  const recs = rad.d.dados.split("&*");
+  const refiled = recs[1].replace("$&Ativo$&1$&", () => "$&Ativo$&2$&").replace("'1109021','1','1584315'", "'1109021','2','1584399'");
+  stubFetch(t, (url) => (url.includes("ListarDocumentos") ? json({ d: { temErro: false, dados: [refiled, recs[0], ""].join("&*") } }) : json({ d: b64("%PDF-1.4 x\n%%EOF") })));
+  const src = cvmSource({ intervalMs: 30_000, extract: async () => "FATO RELEVANTE CONJUNTO das companhias sobre a incorporação aprovada. ".repeat(4) });
+  const items = await src.poll();
+  const v2 = items.find((i) => i.externalId === "1584399")!;
+  const live = items.find((i) => i.externalId === "1584324")!;
+  await src.enrich!(v2);
+  assert.equal((await src.enrich!(live)).duplicateOf, undefined);
 });
 
 test("a joint fato relevante (the same PDF text from two companies) is dropped the second time", async (t) => {
