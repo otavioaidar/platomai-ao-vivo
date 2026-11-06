@@ -28,6 +28,9 @@ test("keeps news titles and drops stock picks, ads, live blogs and service piece
     "Banco eleva preço-alvo da Petrobras",
     "Como criar codornas para produção de carne e ovos",
     "Saiba como declarar o Imposto de Renda 2027",
+    "XP eleva recomendação de Petrobras para compra", "BTG rebaixa Magazine Luiza para venda e corta projeções",
+    "JPMorgan eleva Itaú para overweight", "Goldman Sachs recomenda Vale e vê alta de 30%", "Petrobras ou Vale: qual ação comprar agora?",
+    "Empiricus Research revela carteira para 2027",
   ]) assert.equal(skipTitle(t), true, t);
   for (const t of [
     "Governo prorroga imposto de 12% sobre exportação de petróleo até dezembro",
@@ -37,6 +40,13 @@ test("keeps news titles and drops stock picks, ads, live blogs and service piece
     "TCU recomenda ao governo revisar meta de arrecadação",
     "Inadimplência na carteira de crédito dos bancos sobe em outubro",
     "Como a alta do petróleo chega ao preço da gasolina",
+    "Payroll: EUA abrem 165 mil vagas de emprego em outubro; taxa de desemprego cai para 4,1%",
+    "Brasil cria 213 mil vagas com carteira assinada em setembro", "Cupom cambial dispara com saída de dólares",
+    "Venda de máquinas agrícolas cai 12%, diz Abimaq", "Governo anuncia ações para conter alta no preço dos alimentos",
+    "BNDES aprova R$ 5 bilhões para investir em saneamento", "Petrobras aprova R$ 12 bilhões em dividendos para acionistas",
+    "Haddad diz que não vale a pena aumentar impostos agora", "Caixa reduz juros para compra da casa própria",
+    "TCU recomenda ao governo revisar meta de arrecadação", "Conab eleva estimativa de safra para 320 milhões de toneladas",
+    "Black Friday 2026: brasileiros estão mais exigentes e buscam descontos maiores, diz pesquisa",
   ]) assert.equal(skipTitle(t), false, t);
 });
 
@@ -47,6 +57,11 @@ test("the same story from several outlets is one story; open and close of the do
   assert.equal(sameStory("Dólar abre em alta à espera de dados de emprego nos EUA", "Dólar fecha em alta após dados de emprego nos EUA"), false);
   assert.equal(sameStory("Copom mantém Selic", "Copom eleva Selic"), false);
   assert.equal(sameStory("Dólar sobe", "Dólar sobe"), false, "too few key words to tell");
+  // A negation, a direction or another house of Congress makes another story.
+  assert.equal(sameStory("Haddad diz que haverá aumento de impostos em 2027", "Haddad diz que não haverá aumento de impostos em 2027"), false);
+  assert.equal(sameStory("Petróleo sobe mais de 5% após ataque no Oriente Médio", "Petróleo cai mais de 5% após ataque no Oriente Médio"), false);
+  assert.equal(sameStory("Câmara aprova MP do diesel e créditos de R$ 6,98 bi", "Senado aprova MP do diesel e créditos de R$ 6,98 bi"), false);
+  assert.equal(sameStory("Fed mantém juros e sinaliza cautela com inflação", "Fed mantém juros e sinaliza cautela com a inflação"), true);
 });
 
 test("a Folha link goes to the story, not through the redirector", () => {

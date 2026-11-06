@@ -193,3 +193,12 @@ test("source lists accept any case and separator, and a list with no valid value
   assert.deepEqual(load({ IMPRENSA_FONTES: "G1; Poder360" }).config.press.outlets, ["g1", "poder360"]);
   assert.deepEqual(load({ IMPRENSA_FONTES: "valor" }).config.press.outlets, []);
 });
+
+test("a PLATOMAI key that is set but refused keeps the AI off instead of using the machine's credentials", () => {
+  const { config, warnings } = load({ PLATOMAI_ANTHROPIC_API_KEY: "sk ant", ANTHROPIC_API_KEY: "sk-machine" });
+  assert.equal(config.ai.enabled, false);
+  assert.equal(config.ai.apiKey, "");
+  assert.ok(warnings.some((w) => w.includes("IA desligada")));
+  assert.ok(!warnings.some((w) => w.includes("sk ant") || w.includes("sk-machine")), "no key in the log");
+  assert.equal(load({ ANTHROPIC_API_KEY: "sk-machine" }).config.ai.enabled, true, "without a PLATOMAI key the standard variable still works");
+});

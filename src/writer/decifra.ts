@@ -78,7 +78,11 @@ function headingOf(line: string): Section | null {
   return ORDER.find((s) => HEADINGS[s].test(l)) ?? null;
 }
 
-const isSignature = (line: string) => /^platom\.?ai\s*[—–-]\s*intelig[eê]ncia financeira/i.test(plain(line));
+/** The signature, also in italics, as a quote, after a dash or split over two lines; it is never shown on the site. */
+const isSignature = (line: string) => {
+  const l = plain(line).replace(/[*_`>]/g, "").replace(/^[\s—–-]+/, "").trim();
+  return /^platom\.?ai\s*[—–-]\s*intelig[eê]ncia financeira/i.test(l) || /^platom\.?ai\s*[—–-]?$/i.test(l) || /^intelig[eê]ncia financeira em linguagem clara$/i.test(l);
+};
 
 /** Non-empty blocks separated by blank lines. */
 function paragraphs(lines: string[]): string[] {
@@ -119,7 +123,6 @@ export function parseDecifra(raw: string): Parsed {
     if (m) impact.push({ label: m[1].trim(), text: m[2].trim() });
     else problems.push(`formato: tópico do Impacto sem "Rótulo: frase" (${l.slice(0, 60)})`);
   }
-  if (!lines.some(isSignature)) problems.push("formato: falta a assinatura");
   if (problems.length) return { kind: "invalido", problems };
   return {
     kind: "texto",
@@ -280,6 +283,10 @@ export function checkDecifra(t: DecifraText, source: { text: string; lang: "pt" 
   if (rel) out.push(`use a data, não "${rel[0]}"`);
   const copy = copiedPassage(content.join("\n"), source.text);
   if (copy) out.push(`trecho copiado da fonte: "${copy}"`);
+  // Leftover Markdown or template labels ("*itálico*", "1. Juros", "[TÍTULO]", "Título:") would show as is on the site.
+  const MARKUP = /[*_#\[\]`]|^\s*(?:\d+[.)]|[—–-])\s|^(?:t[íi]tulo|subt[íi]tulo|data)\s*:/imu;
+  const parts: [string, string][] = [["título", t.title], ["subtítulo", t.subtitle], ["data", t.date], ["Resumo", t.summary], ["PlatomAI decifra", t.analysis.join("\n")], ["Mensagem-chave", t.keyMessage], ...t.impact.map((i): [string, string] => [`tópico "${i.label}"`, `${i.label}\n${i.text}`])];
+  for (const [what, s] of parts) if (MARKUP.test(s)) out.push(`marcação no ${what}: reescreva em texto corrido`);
   return out;
 }
 

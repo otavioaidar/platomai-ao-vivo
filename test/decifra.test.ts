@@ -57,8 +57,12 @@ test("a broken format is reported, not guessed", () => {
   const p = parseDecifra(noImpact);
   assert.equal(p.kind, "invalido");
   assert.match((p as { problems: string[] }).problems[0], /Impacto nos mercados/);
-  const noSignature = parseDecifra(fx("copom.md").replace(/Platom\.AI — .*$/m, ""));
-  assert.equal(noSignature.kind, "invalido");
+  // The signature is never shown: a missing or decorated one does not throw a good text away.
+  assert.equal(parseDecifra(fx("copom.md").replace(/Platom\.AI — .*$/m, "")).kind, "texto");
+  for (const sig of ["*Platom.AI — Inteligência Financeira em Linguagem Clara*", "> Platom.AI — Inteligência Financeira em Linguagem Clara", "Platom.AI\nInteligência Financeira em Linguagem Clara"]) {
+    const t = parsed(fx("copom.md").replace(/Platom\.AI — .*$/m, sig));
+    assert.equal(t.keyMessage, parsed(fx("copom.md")).keyMessage, sig);
+  }
   // Headings in Markdown are still headings.
   const md = fx("fomc.md").replace("Resumo", "## Resumo").replace("PlatomAI decifra", "**PlatomAI decifra:**");
   assert.equal(parseDecifra(md).kind, "texto");
@@ -257,4 +261,15 @@ test("a failed rewrite call keeps the first text, which goes to review with its 
   assert.equal(calls, 2);
   assert.equal(out?.kind, "texto");
   assert.match((out as { problems: string[] }).problems.join(), /13,50/);
+});
+
+test("leftover Markdown or template labels go to review instead of showing on the site", () => {
+  const base = parsed(fx("copom.md"));
+  const src = sourceOf(copomItem);
+  const issues = (over: Partial<DecifraText>) => checkDecifra({ ...base, ...over }, src).join();
+  assert.match(issues({ subtitle: "*Para quem toma crédito, o juro segue alto.*" }), /marcação no subtítulo/);
+  assert.match(issues({ title: "[Copom mantém 13,75%]" }), /marcação no título/);
+  assert.match(issues({ title: "Título: Copom mantém 13,75%" }), /marcação no título/);
+  assert.match(issues({ impact: [{ label: "1. Juros", text: "menos espaço para cortes." }] }), /marcação no tópico/);
+  assert.deepEqual(checkDecifra(base, src), [], "the real text has none");
 });

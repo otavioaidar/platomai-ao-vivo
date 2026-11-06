@@ -50,8 +50,15 @@ export const PRESS_FEEDS: PressFeed[] = [
 const SKIP: RegExp[] = [
   // B3 tickers (PETR4, BODB11): company facts come from the CVM filings instead.
   /\b[A-Z]{4}(?:3|4|5|6|11)\b/,
-  /pre[çc]o[- ]alvo|recomenda(?:ção|ções)? de (?:compra|venda)|recomendam? (?:a )?(?:compra|venda)|carteira (?:recomendada|de ações|de dividendos|de fiis)|onde investir|vale a pena|para (?:comprar|investir|lucrar)|(?<![\p{L}])compre(?![\p{L}])|comprar ou vender|hora de (?:comprar|vender)|melhores (?:ações|fundos|fiis|investimentos|bdrs)|ações (?:para|que podem)|renda (?:extra|passiva)|dividendos (?:para|de até)/iu,
-  /desconto|imperdível|cupom|black friday|patrocinad|publieditorial|conteúdo de marca|inscrições|concurso|vagas|mega-sena|loteria|lotofácil|quina|horóscopo/iu,
+  // Picks and recommendations. Generic words only count next to an investment ("ações" is also a government's
+  // measures, "para investir" also public investment): "Governo anuncia ações para conter…" stays.
+  /pre[çc]o[- ]alvo|recomenda(?:ção|ções)? de (?:compra|venda)|recomendam? (?:a )?(?:compra|venda)|carteira (?:recomendada|de ações|de dividendos|de fiis)|onde investir|vale a pena (?:comprar|investir|ter|entrar)|(?:ações|fiis|fundos|bdrs|papéis|criptos?|criptomoedas|títulos) (?:para|pra) (?:comprar|investir|lucrar|ter|receber)|(?<![\p{L}])compre(?![\p{L}])|comprar ou vender|hora de (?:comprar|vender)|melhores (?:ações|fundos|fiis|investimentos|bdrs)|ações que podem (?:subir|disparar|valorizar|render|pagar|dobrar)|qual ação (?:comprar|escolher)|renda passiva|dividendos de até/iu,
+  // Analyst rating changes ("XP eleva Petrobras para compra"); "reduz juros para compra da casa própria" stays.
+  /(?<![\p{L}])(?:eleva|rebaixa|reduz|corta|melhora|reitera|mant[ée]m|inicia cobertura (?:de|da|do|com))(?![\p{L}])[^.;:?!]{0,60}?(?<![\p{L}])para (?:compra|venda|neutr\p{L}*|overweight|underweight|outperform|underperform|equal[- ]weight|market[- ]perform)(?![\p{L}])(?!\s+(?:de|da|do|das|dos)(?![\p{L}]))/iu,
+  // "Goldman Sachs recomenda Vale": a recommendation of a named company (case-sensitive capital); "TCU recomenda ao governo" stays.
+  /(?<![\p{L}])recomendam?\s+\p{Lu}/u,
+  // Advertising, sponsored content and service pieces, as whole words: "165 mil vagas" (Payroll) and "cupom cambial" stay.
+  /(?<![\p{L}])(?:imperdível|cupom de desconto|patrocinad\p{L}*|publieditorial|conteúdo de marca|inscrições|concurso|mega-sena|lotofácil|quina|horóscopo|empiricus)(?![\p{L}])/iu,
   /(?:^|\s)ao vivo(?::|\s*[-–|])/iu,
   // How-to service pieces ("Como criar codornas…", "Saiba como declarar…"), not market news.
   /^(?:saiba |veja |aprenda )?como (?:criar|fazer|montar|plantar|cultivar|cuidar|declarar|sacar|consultar|calcular|economizar|ganhar|abrir|cadastrar|emitir|tirar|pedir|receber|limpar|preparar)(?![\p{L}])/iu,
@@ -110,19 +117,32 @@ export function pressFeeds(outlets: readonly string[], defaultIntervalMs: number
 // ---------------------------------------------------------------------------------------------
 // The same story from several outlets is shown once.
 
+/** Words that turn one story into another: a negation, a direction, a house of Congress. */
+const CONTRAST = new Set([
+  "nao", "nem", "sem", "cai", "caem", "caiu", "sobe", "sobem", "subiu", "recua", "recuam", "avanca", "avancam", "alta", "queda",
+  "abre", "fecha", "eleva", "reduz", "corta", "aumenta", "diminui", "camara", "senado", "aprova", "rejeita", "mantem",
+]);
+
 const STOP = new Set([
   "para", "pelo", "pela", "pelos", "pelas", "com", "sem", "sobre", "após", "apos", "entre", "como", "mais", "menos", "diz", "dizem",
   "veja", "entenda", "que", "dos", "das", "nos", "nas", "uma", "uns", "umas", "seu", "sua", "seus", "suas", "este", "esta", "isso",
-  "até", "ate", "governo",
+  "até", "ate", "governo", "por", "aos", "ser", "tem", "vai", "que", "com", "sem",
 ]);
 
 function keyWords(title: string): Set<string> {
-  const words = title.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "").match(/[\p{L}\p{N}]+(?:[.,]\p{N}+)?%?/gu) ?? [];
-  return new Set(words.filter((w) => (w.length >= 4 || /\d/.test(w)) && !STOP.has(w)));
+  return new Set(words(title).filter((w) => (w.length >= 3 || /\d/.test(w)) && !STOP.has(w)));
+}
+
+function words(title: string): string[] {
+  return title.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "").match(/[\p{L}\p{N}]+(?:[.,]\p{N}+)?%?/gu) ?? [];
 }
 
 /** True when two titles share most of their key words (overlap over the shorter one). */
 export function sameStory(a: string, b: string, threshold = 0.85): boolean {
+  // "haverá" and "não haverá", "sobe" and "cai", Câmara and Senado are different stories.
+  const wa = new Set(words(a).filter((w) => CONTRAST.has(w)));
+  const wb = new Set(words(b).filter((w) => CONTRAST.has(w)));
+  if (wa.size !== wb.size || [...wa].some((w) => !wb.has(w))) return false;
   const x = keyWords(a);
   const y = keyWords(b);
   const small = Math.min(x.size, y.size);

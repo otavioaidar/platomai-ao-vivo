@@ -109,6 +109,9 @@ function reader(env: Env, warn: (msg: string) => void) {
 export function loadConfig(env: Env, warn: (msg: string) => void = (msg) => log.warn(msg)) {
   const r = reader(env, warn);
   const aiKey = r.secret("PLATOMAI_ANTHROPIC_API_KEY");
+  // A key that was set but refused keeps the AI off: the machine's own ANTHROPIC_* credentials are never a fallback.
+  const aiKeyRefused = Boolean(env.PLATOMAI_ANTHROPIC_API_KEY?.trim()) && !aiKey;
+  if (aiKeyRefused) warn("config: PLATOMAI_ANTHROPIC_API_KEY recusada; IA desligada (as variáveis ANTHROPIC_* da máquina não são usadas)");
   return {
     port: r.num("PORT", 8080, 1, 65535, true),
     host: r.str("HOST", "0.0.0.0"),
@@ -161,7 +164,7 @@ export function loadConfig(env: Env, warn: (msg: string) => void = (msg) => log.
       apiKey: aiKey,
       baseUrl: r.url("PLATOMAI_ANTHROPIC_URL", "https://api.anthropic.com"),
       // The SDK also accepts ANTHROPIC_AUTH_TOKEN or an `ant auth login` profile; AI_ENABLED=1 forces it on.
-      enabled: r.bool("AI_ENABLED", Boolean(aiKey || env.ANTHROPIC_API_KEY?.trim() || env.ANTHROPIC_AUTH_TOKEN?.trim())),
+      enabled: !aiKeyRefused && r.bool("AI_ENABLED", Boolean(aiKey || env.ANTHROPIC_API_KEY?.trim() || env.ANTHROPIC_AUTH_TOKEN?.trim())),
       model: r.str("AI_MODEL", "claude-opus-5-5"),
       effort: r.oneOf("AI_EFFORT", EFFORTS, "low"),
       concurrency: r.num("AI_CONCURRENCY", 3, 1, 10, true),

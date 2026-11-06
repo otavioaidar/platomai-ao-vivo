@@ -45,7 +45,8 @@ const decifra = ai.enabled && dc.enabled
         model: dc.model,
         effort: dc.effort,
         promptPath: dc.promptPath,
-        // The agent thinks before it writes: a call takes from 30 s to a few minutes.
+        // The agent thinks before it writes: a call takes from 30 s to a few minutes. The per-request timeout wins over the client's.
+        timeoutMs: 300_000,
         client: anthropicClient({ apiKey: ai.apiKey, baseUrl: ai.baseUrl, timeoutMs: 300_000 }),
       }),
       mode: dc.mode,
