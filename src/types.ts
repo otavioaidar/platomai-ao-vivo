@@ -40,6 +40,8 @@ export interface RawItem {
   reviewOnly?: string;
   /** Set by the pipeline on items from a source's first poll, which are shown as history. */
   firstLoad?: boolean;
+  /** Set by enrich when the item is a copy of another one already handled (e.g. a joint fato relevante filed by two companies): dropped. */
+  duplicateOf?: string;
 }
 
 export interface SourceStatus {

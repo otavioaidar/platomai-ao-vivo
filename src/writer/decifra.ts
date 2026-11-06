@@ -2,7 +2,7 @@
 // analysis. This module calls it, parses its delivery format and checks the text before anyone sees it.
 import type Anthropic from "@anthropic-ai/sdk";
 import { log } from "../log.ts";
-import { fmtNum } from "../text.ts";
+import { fmtNum, parseNumber } from "../text.ts";
 import { Editorial, fenced, safeLink } from "./ai.ts";
 import { unsupportedNumbers } from "./guard.ts";
 import type { Effort } from "../config.ts";
@@ -194,6 +194,39 @@ export function copiedPassage(text: string, source: string, n = COPY_WORDS): str
   return null;
 }
 
+const SCALE_WORDS: [RegExp, number][] = [
+  [/^\s*(?:mil|thousand)(?![\p{L}])/iu, 1e3],
+  [/^\s*(?:milh(?:ão|ao|ões|oes)|million|mn)(?![\p{L}])/iu, 1e6],
+  [/^\s*(?:bilh(?:ão|ao|ões|oes)|billion|bn)(?![\p{L}])/iu, 1e9],
+  [/^\s*(?:trilh(?:ão|ao|ões|oes)|trillion)(?![\p{L}])/iu, 1e12],
+];
+
+function scaleAt(text: string, end: number): number {
+  const tail = text.slice(end, end + 20);
+  return SCALE_WORDS.find(([re]) => re.test(tail))?.[1] ?? 1;
+}
+
+/** "cerca de R$ 1,5 bilhão", "aproximadamente 4%": a rounded number, as the prompt allows. */
+const APPROX = /(?<![\p{L}])(?:cerca de|aproximadamente|em torno de)\s+(?:R\$|US\$|€|\$)?\s*(\d{1,3}(?:\.\d{3})+(?:,\d+)?|\d+(?:,\d+)?)/giu;
+
+/**
+ * The prompt allows rounding with "cerca de" ("Arredonde só com 'cerca de' e sem mudar o sentido"). A rounded number
+ * is blanked out before the number check when the source has a value that rounds to it at the precision written and
+ * is within 5% of it: "cerca de R$ 1,5 bilhão" for R$ 1.524.489.124,76 passes; "cerca de R$ 2 bilhões" does not.
+ */
+export function maskRoundings(text: string, source: string, lang: "pt" | "en"): string {
+  const values = [...source.matchAll(/\d+(?:[.,]\d+)*/g)]
+    .map((m) => parseNumber(m[0], lang) * scaleAt(source, m.index + m[0].length))
+    .filter((v) => Number.isFinite(v) && v > 0);
+  return text.replace(APPROX, (whole: string, raw: string, offset: number) => {
+    const v = parseNumber(raw, "pt");
+    const scale = scaleAt(text, offset + whole.length);
+    const decimals = (raw.split(",")[1] ?? "").length;
+    const backed = v > 0 && values.some((s) => Number((s / scale).toFixed(decimals)) === v && Math.abs(s / scale - v) / v < 0.05);
+    return backed ? whole.replace(raw, "#") : whole;
+  });
+}
+
 /** Everything a human must look at before the text goes out. Empty when it passes. */
 export function checkDecifra(t: DecifraText, source: { text: string; lang: "pt" | "en" }): string[] {
   const out: string[] = [];
@@ -218,7 +251,7 @@ export function checkDecifra(t: DecifraText, source: { text: string; lang: "pt" 
   if (!ATTRIBUTION.test(t.summary)) out.push("Resumo não cita a fonte (\"Segundo…\", \"De acordo com…\")");
 
   const all = [t.date, ...content].join("\n");
-  const bad = unsupportedNumbers(all, source.text, source.lang);
+  const bad = unsupportedNumbers(maskRoundings(all, source.text, source.lang), source.text, source.lang);
   if (bad.length) out.push(`números sem respaldo na fonte: ${[...new Set(bad)].join(", ")}`);
 
   const text = lower(all);

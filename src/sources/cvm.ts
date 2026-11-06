@@ -2,6 +2,7 @@
 // official filing, published free by the regulator; the full text comes from the filed PDF via `pdftotext`
 // (poppler-utils, installed in the Docker image). Without it, the headline is written from the filing's subject only.
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { log } from "../log.ts";
 import { postJson } from "../net.ts";
 import { decodeEntities } from "../text.ts";
@@ -186,6 +187,11 @@ export function cvmSource(o: CvmOptions): Source {
   const filings = new Map<string, CvmFiling>();
   /** Twin key → the protocol kept for it: the lowest of the first answer that listed it. */
   const kept = new Map<string, string>();
+  /**
+   * Hash of a filing's text → the protocol that brought it first. A joint fato relevante is filed by each company with
+   * the same PDF (Sabesp and EMAE on 27/10/2026, Raízen and Raízen Energia on 30/10/2026): one story, not two.
+   */
+  const texts = new Map<string, string>();
   return {
     id: "cvm-fatos",
     name: "CVM (fatos relevantes)",
@@ -270,6 +276,14 @@ export function cvmSource(o: CvmOptions): Source {
       if (!extracted) return item;
       const { text, lang } = portugueseText(extracted);
       if (!text) return item;
+      const norm = text.replace(/\s+/g, " ").trim();
+      if (norm.length >= 200) {
+        const hash = createHash("sha1").update(norm).digest("hex");
+        const first = texts.get(hash);
+        if (first && first !== f.protocol) return { ...item, duplicateOf: first };
+        if (!first) texts.set(hash, f.protocol);
+        while (texts.size > 500) texts.delete(texts.keys().next().value!);
+      }
       const cut = text.length > MAX_TEXT ? `${text.slice(0, MAX_TEXT)} […]` : text;
       return { ...item, body: `${item.body}\n\n${cut}`, lang };
     },

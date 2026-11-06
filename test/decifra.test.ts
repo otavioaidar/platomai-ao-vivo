@@ -5,7 +5,7 @@ import path from "node:path";
 import { test } from "node:test";
 import type Anthropic from "@anthropic-ai/sdk";
 import {
-  ClaudeDecifrador, LIMITS, checkDecifra, copiedPassage, formatDecifra, materialOf, parseDecifra, ptDate, releaseMaterial, userMessage, wordCount,
+  ClaudeDecifrador, LIMITS, checkDecifra, copiedPassage, formatDecifra, maskRoundings, materialOf, parseDecifra, ptDate, releaseMaterial, userMessage, wordCount,
 } from "../src/writer/decifra.ts";
 import { publicHeadline } from "../src/view.ts";
 import type { DecifraText, Headline, RawItem } from "../src/types.ts";
@@ -205,4 +205,17 @@ test("the public view shows a decifra only once published, and never the check n
   assert.equal(shown.decifra?.title, t.title);
   assert.equal(shown.decifra?.checks, undefined);
   assert.equal(shown.decifraSkipped, undefined);
+});
+
+test("a number rounded with \"cerca de\" passes when the source rounds to it, as the prompt allows", () => {
+  // Real cases from the CVM test of 05/11/2026 (Aeris and Aura Minerals).
+  const aeris = "créditos quirografários no montante total de R$ 1.524.489.124,76, apurado em 31 de outubro de 2026";
+  const ok = (text: string, src: string) => checkDecifra({ ...parsed(fx("copom.md")), summary: `Segundo a empresa, ${text}`, title: "T", subtitle: "S", analysis: ["A.", "B."], impact: [{ label: "Crédito", text: "x." }], keyMessage: "M." }, { text: `${src}\n4 de novembro de 2026`, lang: "pt" });
+  assert.deepEqual(ok("o plano cobre cerca de R$ 1,5 bilhão em créditos.", aeris), []);
+  assert.deepEqual(ok("o valor é de cerca de R$ 1,31 por BDR.", "dividendo a pagar aos detentores de BDRs de BRL 1,314528 por BDR"), []);
+  assert.match(ok("o plano cobre cerca de R$ 2 bilhões em créditos.", aeris).join(), /números sem respaldo na fonte: 2/);
+  assert.match(ok("o plano cobre cerca de R$ 1,6 bilhão em créditos.", aeris).join(), /números sem respaldo na fonte: 1,6/);
+  assert.match(ok("o plano cobre R$ 1,5 bilhão em créditos.", aeris).join(), /1,5/, "without \"cerca de\" a rounding is not allowed");
+  assert.equal(maskRoundings("cerca de 4% ao ano", "inflação de 4,04%", "pt"), "cerca de #% ao ano");
+  assert.equal(maskRoundings("cerca de US$ 1,5 bilhão", "about $1.52 billion in debt", "en"), "cerca de US$ # bilhão");
 });

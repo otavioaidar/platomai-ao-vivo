@@ -841,3 +841,14 @@ test("a fato relevante gets a decifra only when the writer ranks it from DECIFRA
   await bcb.p.drain(2000);
   assert.equal(bcb.decifrador.calls.length, 1);
 });
+
+test("an item that enrich marks as a copy of another is dropped: no headline, no decifra", async () => {
+  const s = setupDecifra("automatica");
+  const src = { ...s.src, enrich: async (i: RawItem) => ({ ...i, duplicateOf: "outro" }) };
+  await s.p.runOnce(src);
+  assert.deepEqual(await s.p.runOnce(src), []);
+  await s.p.drain(2000);
+  assert.equal(s.writer.calls, 0);
+  assert.equal(s.store.latest(10).length, 0);
+  assert.equal(s.store.pendingCount(), 0);
+});

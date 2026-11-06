@@ -257,6 +257,11 @@ export class Pipeline {
 
   private async process(src: Source, job: PendingJob): Promise<Headline | null> {
     const item = src.enrich ? await src.enrich(job.item) : job.item;
+    if (item.duplicateOf) {
+      log.info(`${src.id}: ${item.title} repete ${item.duplicateOf}; descartado`);
+      this.o.store.finish(job.key, null);
+      return null;
+    }
     if (src.kind === "imprensa") return this.press(src, item, job);
     // Licensed for internal use only: keep it for the private review page, never public, and never sent to the AI.
     if (item.reviewOnly) return this.commit(job, { ...this.review(src, item, job, item.reviewOnly), internalOnly: true });

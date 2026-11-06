@@ -220,3 +220,21 @@ test("the same fato relevante delivered twice in the same minute is one item", a
   stubFetch(t, () => json({ d: { temErro: false, dados: [twin, recs[1], ""].join("&*") } }));
   assert.deepEqual((await other.poll()).map((i) => i.externalId), ["1584316"]);
 });
+
+test("a joint fato relevante (the same PDF text from two companies) is dropped the second time", async (t) => {
+  const recs = rad.d.dados.split("&*");
+  stubFetch(t, (url) => (url.includes("ListarDocumentos") ? json({ d: { temErro: false, dados: [recs[0], recs[1], ""].join("&*") } }) : json({ d: b64("%PDF-1.4 x\n%%EOF") })));
+  const joint = "FATO RELEVANTE CONJUNTO. As Companhias informam a consumação da incorporação de ações aprovada pelas assembleias. ".repeat(4);
+  const src = cvmSource({ intervalMs: 30_000, extract: async () => joint });
+  const [axia, porto] = await src.poll();
+  const first = await src.enrich!(axia);
+  assert.equal(first.duplicateOf, undefined);
+  assert.equal((await src.enrich!(axia)).duplicateOf, undefined, "a retry of the same filing is not a copy of itself");
+  assert.equal((await src.enrich!(porto)).duplicateOf, "1584324");
+
+  // A short boilerplate text never counts as a copy.
+  const short = cvmSource({ intervalMs: 30_000, extract: async () => "FATO RELEVANTE" });
+  const [a2, p2] = await short.poll();
+  await short.enrich!(a2);
+  assert.equal((await short.enrich!(p2)).duplicateOf, undefined);
+});
